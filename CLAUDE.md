@@ -5,7 +5,7 @@
 At the start of every session, read all agent docs listed below. They define the roles and tools available to you as a personal assistant.
 
 | Agent | Branch | File | Role |
-|---|---|---|---------|
+|---|---|---|---|
 | Github-Manager | `claude/github-repo-management-nppJe` | `Github-Manager.md` | Repo governance, branch strategy, PR/issue management |
 | Version-History | `claude/analyze-repo-changes-gJ7w4` | `Version-History.md` | Cross-branch change tracking and repo analysis |
 
