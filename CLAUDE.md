@@ -8,6 +8,7 @@ At the start of every session, read all agent docs listed below. They define the
 |---|---|---|---|
 | Github-Manager | `claude/github-repo-management-nppJe` | `Github-Manager.md` | Repo governance, branch strategy, PR/issue management |
 | Version-History | `claude/analyze-repo-changes-gJ7w4` | `Version-History.md` | Cross-branch change tracking and repo analysis |
+| Notion-Manager | `claude/notion-manager-mK3pX` | `Notion-Manager.md` | Notion workspace topology, change tracking, persistent memory |
 
 Agent docs are cached locally at `.claude/agents/` — read them from there each session.
 
@@ -17,7 +18,9 @@ Agent docs are cached locally at `.claude/agents/` — read them from there each
 
 1. Read `.claude/agents/Github-Manager.md` to load repo governance context
 2. Read `.claude/agents/Version-History.md` to load version tracking context
-3. Use these agents whenever the user asks about GitHub activity, repo changes, or project status
+3. Read `.claude/agents/Notion-Manager.md` to load Notion workspace context
+4. Read `.claude/agents/notion-snapshot.md` for last known Notion workspace state
+5. Use these agents whenever the user asks about GitHub activity, repo changes, Notion, or project status
 
 ---
 
