@@ -26,6 +26,12 @@ curl -fsSL "${BASE_URL}/claude/analyze-repo-changes-gJ7w4/Version-History.md" \
   echo "[session-start] Version-History.md loaded" || \
   echo "[session-start] WARNING: Failed to fetch Version-History.md"
 
+# Fetch Notion-Manager
+curl -fsSL "${BASE_URL}/claude/notion-manager-mK3pX/Notion-Manager.md" \
+  -o "${AGENTS_DIR}/Notion-Manager.md" && \
+  echo "[session-start] Notion-Manager.md loaded" || \
+  echo "[session-start] WARNING: Failed to fetch Notion-Manager.md"
+
 echo "[session-start] Building repo snapshot for Version-History..."
 
 SNAPSHOT_FILE="${AGENTS_DIR}/repo-snapshot.md"
