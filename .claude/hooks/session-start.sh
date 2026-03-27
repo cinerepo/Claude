@@ -6,28 +6,40 @@ mkdir -p "$AGENTS_DIR"
 
 REPO="cinerepo/claude"
 
-echo "[session-start] Fetching agent docs..."
+echo "[session-start] Discovering agent branches..."
 
-# Helper: fetch a file from a specific branch using gh CLI (handles auth)
-fetch_file() {
-  local branch="$1"
-  local path="$2"
-  local dest="$3"
-  local filename
-  filename=$(basename "$dest")
+BRANCHES=$(gh api "repos/${REPO}/branches" --jq '.[].name' 2>/dev/null || true)
 
-  gh api "repos/${REPO}/contents/${path}?ref=${branch}" \
-    --jq '.content' 2>/dev/null \
-    | base64 --decode > "$dest" \
-    && echo "[session-start] ${filename} loaded" \
-    || echo "[session-start] WARNING: Failed to fetch ${filename}"
-}
+if [ -z "$BRANCHES" ]; then
+  echo "[session-start] WARNING: Could not fetch branches — check gh auth status"
+  exit 1
+fi
 
-fetch_file "claude/github-repo-management-nppJe" "Github-Manager.md" "${AGENTS_DIR}/Github-Manager.md"
-fetch_file "claude/analyze-repo-changes-gJ7w4"  "Version-History.md" "${AGENTS_DIR}/Version-History.md"
-fetch_file "claude/notion-manager-mK3pX"         "Notion-Manager.md"  "${AGENTS_DIR}/Notion-Manager.md"
+# Process each claude/ branch
+while IFS= read -r branch; do
+  [[ "$branch" != claude/* ]] && continue
 
-echo "[session-start] Building repo snapshot for Version-History..."
+  # List root-level .md files, skip README.md and CLAUDE.md
+  FILES=$(gh api "repos/${REPO}/contents/?ref=${branch}" \
+    --jq '.[] | select(.type == "file") | select(.name | endswith(".md")) | select(.name | IN("README.md","CLAUDE.md") | not) | .name' \
+    2>/dev/null || true)
+
+  if [ -z "$FILES" ]; then
+    continue
+  fi
+
+  while IFS= read -r filename; do
+    dest="${AGENTS_DIR}/${filename}"
+    gh api "repos/${REPO}/contents/${filename}?ref=${branch}" \
+      --jq '.content' 2>/dev/null \
+      | base64 --decode > "$dest" \
+      && echo "[session-start] Loaded ${filename} (from ${branch})" \
+      || echo "[session-start] WARNING: Failed to fetch ${filename} from ${branch}"
+  done <<< "$FILES"
+
+done <<< "$BRANCHES"
+
+echo "[session-start] Building repo snapshot..."
 
 SNAPSHOT_FILE="${AGENTS_DIR}/repo-snapshot.md"
 TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
@@ -39,16 +51,11 @@ TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
   echo "## Branches"
   echo ""
 
-  BRANCHES=$(gh api "repos/${REPO}/branches" --jq '.[].name' 2>/dev/null || true)
-  if [ -n "$BRANCHES" ]; then
-    while IFS= read -r branch; do
-      INFO=$(gh api "repos/${REPO}/commits?sha=${branch}&per_page=1" \
-        --jq '.[0] | (.sha[:7]) + " " + (.commit.message | split("\n")[0][:60])' 2>/dev/null || echo "unknown")
-      echo "- \`${branch}\` — ${INFO}"
-    done <<< "$BRANCHES"
-  else
-    echo "- Unable to fetch branches"
-  fi
+  while IFS= read -r branch; do
+    INFO=$(gh api "repos/${REPO}/commits?sha=${branch}&per_page=1" \
+      --jq '.[0] | (.sha[:7]) + " " + (.commit.message | split("\n")[0][:60])' 2>/dev/null || echo "unknown")
+    echo "- \`${branch}\` — ${INFO}"
+  done <<< "$BRANCHES"
 
   echo ""
   echo "## Recent Commits (main)"
