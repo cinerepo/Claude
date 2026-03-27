@@ -1,36 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
-# Only run in remote (Claude Code web) environment
-if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
-  exit 0
-fi
-
 AGENTS_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.claude/agents"
 mkdir -p "$AGENTS_DIR"
 
-BASE_URL="https://raw.githubusercontent.com/cinerepo/claude"
-API_URL="https://api.github.com/repos/cinerepo/claude"
+REPO="cinerepo/claude"
 
 echo "[session-start] Fetching agent docs..."
 
-# Fetch Github-Manager
-curl -fsSL "${BASE_URL}/claude/github-repo-management-nppJe/Github-Manager.md" \
-  -o "${AGENTS_DIR}/Github-Manager.md" && \
-  echo "[session-start] Github-Manager.md loaded" || \
-  echo "[session-start] WARNING: Failed to fetch Github-Manager.md"
+# Helper: fetch a file from a specific branch using gh CLI (handles auth)
+fetch_file() {
+  local branch="$1"
+  local path="$2"
+  local dest="$3"
+  local filename
+  filename=$(basename "$dest")
 
-# Fetch Version-History
-curl -fsSL "${BASE_URL}/claude/analyze-repo-changes-gJ7w4/Version-History.md" \
-  -o "${AGENTS_DIR}/Version-History.md" && \
-  echo "[session-start] Version-History.md loaded" || \
-  echo "[session-start] WARNING: Failed to fetch Version-History.md"
+  gh api "repos/${REPO}/contents/${path}?ref=${branch}" \
+    --jq '.content' 2>/dev/null \
+    | base64 --decode > "$dest" \
+    && echo "[session-start] ${filename} loaded" \
+    || echo "[session-start] WARNING: Failed to fetch ${filename}"
+}
 
-# Fetch Notion-Manager
-curl -fsSL "${BASE_URL}/claude/notion-manager-mK3pX/Notion-Manager.md" \
-  -o "${AGENTS_DIR}/Notion-Manager.md" && \
-  echo "[session-start] Notion-Manager.md loaded" || \
-  echo "[session-start] WARNING: Failed to fetch Notion-Manager.md"
+fetch_file "claude/github-repo-management-nppJe" "Github-Manager.md" "${AGENTS_DIR}/Github-Manager.md"
+fetch_file "claude/analyze-repo-changes-gJ7w4"  "Version-History.md" "${AGENTS_DIR}/Version-History.md"
+fetch_file "claude/notion-manager-mK3pX"         "Notion-Manager.md"  "${AGENTS_DIR}/Notion-Manager.md"
 
 echo "[session-start] Building repo snapshot for Version-History..."
 
@@ -38,21 +33,19 @@ SNAPSHOT_FILE="${AGENTS_DIR}/repo-snapshot.md"
 TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
 
 {
-  echo "# Repo Snapshot — cinerepo/claude"
+  echo "# Repo Snapshot — ${REPO}"
   echo "Generated: ${TIMESTAMP}"
   echo ""
   echo "## Branches"
   echo ""
 
-  # Fetch all branches and their latest commit
-  BRANCHES=$(curl -fsSL "${API_URL}/branches" 2>/dev/null || echo "[]")
-  if [ "$BRANCHES" != "[]" ]; then
-    echo "$BRANCHES" | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | while read -r branch; do
-      COMMIT=$(curl -fsSL "${API_URL}/commits?sha=${branch}&per_page=1" 2>/dev/null || echo "[]")
-      SHA=$(echo "$COMMIT" | grep -o '"sha":"[^"]*"' | head -1 | sed 's/"sha":"//;s/"//' | cut -c1-7)
-      MSG=$(echo "$COMMIT" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"//' | cut -c1-60)
-      echo "- \`${branch}\` — \`${SHA}\` ${MSG}"
-    done
+  BRANCHES=$(gh api "repos/${REPO}/branches" --jq '.[].name' 2>/dev/null || true)
+  if [ -n "$BRANCHES" ]; then
+    while IFS= read -r branch; do
+      INFO=$(gh api "repos/${REPO}/commits?sha=${branch}&per_page=1" \
+        --jq '.[0] | (.sha[:7]) + " " + (.commit.message | split("\n")[0][:60])' 2>/dev/null || echo "unknown")
+      echo "- \`${branch}\` — ${INFO}"
+    done <<< "$BRANCHES"
   else
     echo "- Unable to fetch branches"
   fi
@@ -61,15 +54,9 @@ TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
   echo "## Recent Commits (main)"
   echo ""
 
-  COMMITS=$(curl -fsSL "${API_URL}/commits?per_page=5" 2>/dev/null || echo "[]")
-  if [ "$COMMITS" != "[]" ]; then
-    echo "$COMMITS" | grep -o '"sha":"[^"]*"\|"message":"[^"]*"' | paste - - | \
-      sed 's/"sha":"//;s/"message":"//;s/"//g' | \
-      awk -F'\t' '{print "- `" substr($1,1,7) "` " substr($2,1,72)}' || \
-      echo "- Unable to parse commits"
-  else
-    echo "- Unable to fetch commits"
-  fi
+  gh api "repos/${REPO}/commits?per_page=5" \
+    --jq '.[] | "- `" + .sha[:7] + "` " + (.commit.message | split("\n")[0][:72])' 2>/dev/null \
+    || echo "- Unable to fetch commits"
 
 } > "$SNAPSHOT_FILE"
 
