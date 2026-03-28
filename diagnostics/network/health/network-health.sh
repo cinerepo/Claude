@@ -91,7 +91,7 @@ while IFS=$'\t' read -r ip mac vendor; do
   SEEN_MACS+=("$mac")
 
   # Try reverse DNS for hostname
-  hostname=$(dns-sd -G v4 "$ip" 2>/dev/null | awk 'NR==2{print $4}' | sed 's/\.$//' || echo "unknown")
+  hostname=$(dig +short +time=2 +tries=1 -x "$ip" 2>/dev/null | sed 's/\.$//' || echo "unknown")
   [ -z "$hostname" ] && hostname="unknown"
 
   exists=$(jq --arg mac "$mac" 'any(.[]; .mac == $mac)' "$DB")
@@ -99,7 +99,7 @@ while IFS=$'\t' read -r ip mac vendor; do
   if [ "$exists" = "false" ]; then
     # New device — run nmap to get open ports
     echo "[+] NEW device found: $ip ($mac) — scanning ports..."
-    ports=$(nmap -sS --open -oG - "$ip" 2>/dev/null | grep "Ports:" | grep -oP '\d+(?=/open)' | tr '\n' ',' | sed 's/,$//' || echo "")
+    ports=$(nmap -sT --open -oG - "$ip" 2>/dev/null | grep "Ports:" | sed 's/.*Ports: //' | tr ',' '\n' | grep '/open/' | sed 's|/.*||' | tr '\n' ',' | sed 's/,$//' || echo "")
 
     jq --arg ip "$ip" --arg mac "$mac" --arg vendor "$vendor" \
        --arg hostname "$hostname" --arg ports "$ports" \
