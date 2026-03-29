@@ -1,1 +1,90 @@
-[]
+[
+  {
+    "mac": "48:41:7b:ef:17:21",
+    "ip": "192.168.1.254",
+    "hostname": "unknown",
+    "vendor": "(Unknown)",
+    "open_ports": ["53", " 80", " 443"],
+    "first_seen": "2026-03-27_23-58-23",
+    "last_seen": "2026-03-28_21-00-10",
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "0c:91:60:73:65:0e",
+    "ip": "192.168.1.74",
+    "hostname": "unknown",
+    "vendor": "Hui Zhou Gaoshengda Technology Co.,LTD",
+    "open_ports": ["443", " 554", " 8081"],
+    "first_seen": "2026-03-27_23-42-06",
+    "last_seen": "2026-03-28_21-00-10",
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "ce:95:30:7f:5d:5a",
+    "ip": "192.168.1.84",
+    "hostname": "unknown",
+    "vendor": "(Unknown: locally administered)",
+    "open_ports": [],
+    "first_seen": "2026-03-27_23-42-06",
+    "last_seen": "2026-03-28_21-00-10",
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "94:bd:be:b1:43:c9",
+    "ip": "192.168.1.86",
+    "hostname": "unknown",
+    "vendor": "(Unknown)",
+    "open_ports": [],
+    "first_seen": "2026-03-27_23-58-23",
+    "last_seen": "2026-03-28_21-00-10",
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "fc:e9:d8:53:e7:7a",
+    "ip": "192.168.1.79",
+    "hostname": "unknown",
+    "vendor": "Amazon Technologies Inc.",
+    "open_ports": [],
+    "first_seen": "2026-03-27_23-58-23",
+    "last_seen": "2026-03-28_21-00-10",
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "d4:f9:21:b7:88:26",
+    "ip": "192.168.1.76",
+    "hostname": "unknown",
+    "vendor": "(Unknown)",
+    "open_ports": [],
+    "first_seen": "2026-03-27_23-42-06",
+    "last_seen": "2026-03-28_21-00-10",
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "2c:d1:c6:44:b4:10",
+    "ip": "192.168.1.75",
+    "hostname": "unknown",
+    "vendor": "Murata Manufacturing Co., Ltd.",
+    "open_ports": ["80"],
+    "first_seen": "2026-03-27_23-58-23",
+    "last_seen": "2026-03-28_21-00-10",
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "4c:24:98:70:9e:44",
+    "ip": "192.168.1.85",
+    "hostname": "unknown",
+    "vendor": "Texas Instruments",
+    "open_ports": [],
+    "first_seen": "2026-03-27_23-58-23",
+    "last_seen": "2026-03-27_23-58-23",
+    "status": "down",
+    "notes": ""
+  }
+]
