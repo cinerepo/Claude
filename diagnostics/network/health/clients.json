@@ -10,7 +10,7 @@
       " 443"
     ],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-29_10-51-55",
+    "last_seen": "2026-03-29_10-53-36",
     "status": "up",
     "notes": ""
   },
@@ -25,7 +25,7 @@
       " 8081"
     ],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-03-29_10-51-55",
+    "last_seen": "2026-03-29_10-53-36",
     "status": "up",
     "notes": ""
   },
@@ -36,8 +36,8 @@
     "vendor": "(Unknown: locally administered)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-03-29_10-51-55",
-    "status": "up",
+    "last_seen": "2026-03-29_10-53-36",
+    "status": "down",
     "notes": ""
   },
   {
@@ -47,7 +47,7 @@
     "vendor": "(Unknown)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-29_10-51-55",
+    "last_seen": "2026-03-29_10-53-36",
     "status": "up",
     "notes": "Adalynn's TV"
   },
@@ -58,7 +58,7 @@
     "vendor": "Amazon Technologies Inc.",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-29_10-51-55",
+    "last_seen": "2026-03-29_10-53-36",
     "status": "up",
     "notes": ""
   },
@@ -69,7 +69,7 @@
     "vendor": "(Unknown)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-03-29_10-51-55",
+    "last_seen": "2026-03-29_10-53-36",
     "status": "up",
     "notes": ""
   },
@@ -82,7 +82,7 @@
       "80"
     ],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-29_10-51-55",
+    "last_seen": "2026-03-29_10-53-36",
     "status": "up",
     "notes": ""
   },
@@ -93,7 +93,18 @@
     "vendor": "Texas Instruments",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-29_10-51-55",
+    "last_seen": "2026-03-29_10-53-36",
+    "status": "down",
+    "notes": ""
+  },
+  {
+    "mac": "9a:47:68:8e:9e:63",
+    "ip": "192.168.1.70",
+    "hostname": "unknown",
+    "vendor": "(Unknown: locally administered)",
+    "open_ports": [],
+    "first_seen": "2026-03-29_10-53-36",
+    "last_seen": "2026-03-29_10-53-36",
     "status": "up",
     "notes": ""
   }
