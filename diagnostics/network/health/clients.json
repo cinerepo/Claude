@@ -4,9 +4,13 @@
     "ip": "192.168.1.254",
     "hostname": "unknown",
     "vendor": "(Unknown)",
-    "open_ports": ["53", " 80", " 443"],
+    "open_ports": [
+      "53",
+      " 80",
+      " 443"
+    ],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-28_21-00-10",
+    "last_seen": "2026-03-29_10-51-55",
     "status": "up",
     "notes": ""
   },
@@ -15,9 +19,13 @@
     "ip": "192.168.1.74",
     "hostname": "unknown",
     "vendor": "Hui Zhou Gaoshengda Technology Co.,LTD",
-    "open_ports": ["443", " 554", " 8081"],
+    "open_ports": [
+      "443",
+      " 554",
+      " 8081"
+    ],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-03-28_21-00-10",
+    "last_seen": "2026-03-29_10-51-55",
     "status": "up",
     "notes": ""
   },
@@ -28,7 +36,7 @@
     "vendor": "(Unknown: locally administered)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-03-28_21-00-10",
+    "last_seen": "2026-03-29_10-51-55",
     "status": "up",
     "notes": ""
   },
@@ -39,7 +47,7 @@
     "vendor": "(Unknown)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-28_21-00-10",
+    "last_seen": "2026-03-29_10-51-55",
     "status": "up",
     "notes": ""
   },
@@ -50,7 +58,7 @@
     "vendor": "Amazon Technologies Inc.",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-28_21-00-10",
+    "last_seen": "2026-03-29_10-51-55",
     "status": "up",
     "notes": ""
   },
@@ -61,7 +69,7 @@
     "vendor": "(Unknown)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-03-28_21-00-10",
+    "last_seen": "2026-03-29_10-51-55",
     "status": "up",
     "notes": ""
   },
@@ -70,9 +78,11 @@
     "ip": "192.168.1.75",
     "hostname": "unknown",
     "vendor": "Murata Manufacturing Co., Ltd.",
-    "open_ports": ["80"],
+    "open_ports": [
+      "80"
+    ],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-28_21-00-10",
+    "last_seen": "2026-03-29_10-51-55",
     "status": "up",
     "notes": ""
   },
@@ -83,8 +93,8 @@
     "vendor": "Texas Instruments",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-03-27_23-58-23",
-    "status": "down",
+    "last_seen": "2026-03-29_10-51-55",
+    "status": "up",
     "notes": ""
   }
 ]
