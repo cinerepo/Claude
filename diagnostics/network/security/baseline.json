@@ -1,3 +1,18 @@
 {
-  "_note": "Baseline not yet established. Run: sudo ./network-security.sh --init"
+  "established": "2026-03-29_23-46-34",
+  "iface": "en0",
+  "local_ip": "192.168.1.69",
+  "gateway": {
+    "ip": "192.168.1.254",
+    "mac": "48:41:7b:ef:17:21"
+  },
+  "wifi": {
+    "ssid": "You are not associated with an AirPort network.",
+    "bssid": "unknown",
+    "channel": "unknown"
+  },
+  "dns_fingerprints": {
+    "cloudflare_com_via_1_1_1_1": "104.16.132.229,104.16.133.229",
+    "google_com_via_8_8_8_8": "142.251.186.100,142.251.186.101,142.251.186.102,142.251.186.113,142.251.186.138,142.251.186.139"
+  }
 }
