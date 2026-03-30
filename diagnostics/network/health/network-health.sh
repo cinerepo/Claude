@@ -12,20 +12,83 @@ REPORTS_DIR="$SCRIPT_DIR/reports"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 REPORT="$REPORTS_DIR/report_$TIMESTAMP.txt"
 TMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TMP_DIR"' EXIT
+SPINNER_PID=""
+
+cleanup() {
+  [ -n "$SPINNER_PID" ] && kill "$SPINNER_PID" 2>/dev/null || true
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
 mkdir -p "$REPORTS_DIR"
 [ ! -f "$DB" ] && echo "[]" > "$DB"
 
 for cmd in arp-scan nmap jq ping dig; do
   if ! command -v "$cmd" &>/dev/null; then
-    echo "[ERROR] Missing: $cmd — brew install $cmd"
+    echo "  ✗  Missing dependency: $cmd — brew install $cmd"
     exit 1
   fi
 done
 
 NBTSCAN_AVAIL=false
 command -v nbtscan &>/dev/null && NBTSCAN_AVAIL=true
+
+# =============================================================================
+# COLORS + UI
+# =============================================================================
+R='\033[0m'       # reset
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[32m'
+RED='\033[31m'
+YELLOW='\033[33m'
+CYAN='\033[36m'
+WHITE='\033[97m'
+
+SPIN_FRAMES=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+
+spin_start() {
+  local msg="$1"
+  (
+    local i=0
+    while true; do
+      printf "\r  ${DIM}%s${R}  %s" "${SPIN_FRAMES[$((i % 10))]}" "$msg"
+      sleep 0.08
+      ((i++)) || true
+    done
+  ) &
+  SPINNER_PID=$!
+}
+
+spin_stop() {
+  local msg="$1"
+  [ -n "$SPINNER_PID" ] && kill "$SPINNER_PID" 2>/dev/null || true
+  wait "$SPINNER_PID" 2>/dev/null || true
+  SPINNER_PID=""
+  printf "\r  ${GREEN}✓${R}  %-60s\n" "$msg"
+}
+
+spin_stop_warn() {
+  local msg="$1"
+  [ -n "$SPINNER_PID" ] && kill "$SPINNER_PID" 2>/dev/null || true
+  wait "$SPINNER_PID" 2>/dev/null || true
+  SPINNER_PID=""
+  printf "\r  ${YELLOW}⚠${R}  %-60s\n" "$msg"
+}
+
+section() {
+  local title="$1"
+  printf "\n  ${BOLD}${WHITE}%s${R}\n" "$title"
+  printf "  ${DIM}%s${R}\n" "──────────────────────────────────────────────────────────"
+  log ""
+  log "$title"
+  log "──────────────────────────────────────────────────────────"
+}
+
+ok()   { printf "  ${GREEN}✓${R}  %s\n" "$1"; log "  ✓  $1"; }
+warn() { printf "  ${YELLOW}⚠${R}  %s\n" "$1"; log "  ⚠  $1"; }
+info() { printf "  ${DIM}·${R}  %s\n" "$1"; log "  ·  $1"; }
+log()  { printf '%s\n' "$@" >> "$REPORT"; }
 
 # =============================================================================
 # INTERFACE DETECTION
@@ -52,7 +115,7 @@ detect_interface() {
 
 IFACE_INFO=$(detect_interface)
 if [ -z "$IFACE_INFO" ]; then
-  echo "[ERROR] No active interface found."
+  printf "  ${RED}✗${R}  No active network interface found.\n"
   exit 1
 fi
 IFACE=$(echo "$IFACE_INFO" | awk '{print $1}')
@@ -63,78 +126,79 @@ GATEWAY=$(route -n get default 2>/dev/null | awk '/gateway:/{print $2}' | head -
 # =============================================================================
 # HEADER
 # =============================================================================
-{
-  echo "======================================================"
-  echo " Cinesys Network Health Report — $TIMESTAMP"
-  echo "======================================================"
-  echo " Interface : $IFACE"
-  echo " Local IP  : $LOCAL_IP"
-  echo " Subnet    : $SUBNET"
-  echo " Gateway   : $GATEWAY"
-  echo "------------------------------------------------------"
-} | tee "$REPORT"
+HEADER_DATE=$(date +"%Y-%m-%d  %H:%M:%S")
+printf "\n"
+printf "  ${BOLD}${WHITE}╭──────────────────────────────────────────────────────────╮${R}\n"
+printf "  ${BOLD}${WHITE}│${R}  ${BOLD}Cinesys · Network Health${R}%-34s${BOLD}${WHITE}│${R}\n" ""
+printf "  ${BOLD}${WHITE}│${R}  ${DIM}%s${R}%-34s${BOLD}${WHITE}│${R}\n" "$HEADER_DATE" ""
+printf "  ${BOLD}${WHITE}│${R}  ${DIM}%s  ·  %s  ·  %s${R}%-*s${BOLD}${WHITE}│${R}\n" "$IFACE" "$LOCAL_IP" "$SUBNET" "$((34 - ${#IFACE} - ${#LOCAL_IP} - ${#SUBNET} - 6))" ""
+printf "  ${BOLD}${WHITE}╰──────────────────────────────────────────────────────────╯${R}\n"
+
+log "======================================================"
+log " Cinesys Network Health Report — $TIMESTAMP"
+log "======================================================"
+log " Interface : $IFACE"
+log " Local IP  : $LOCAL_IP"
+log " Subnet    : $SUBNET"
+log " Gateway   : $GATEWAY"
+log "======================================================"
 
 # =============================================================================
 # INTERNET + DNS HEALTH
 # =============================================================================
-echo "" | tee -a "$REPORT"
-echo "[*] Internet + DNS health..." | tee -a "$REPORT"
+section "Internet"
 
 for target in "1.1.1.1" "8.8.8.8"; do
   result=$(ping -c 3 -W 1 "$target" 2>/dev/null | tail -1 || echo "")
   if echo "$result" | grep -q "avg"; then
     latency=$(echo "$result" | awk -F'/' '{print $5 "ms"}')
-    printf "    %-14s UP        %s\n" "$target" "$latency" | tee -a "$REPORT"
+    printf "  ${GREEN}✓${R}  ${WHITE}%-14s${R}  ${DIM}%s${R}\n" "$target" "$latency"
+    log "  ✓  $target  $latency"
   else
-    printf "    %-14s UNREACHABLE\n" "$target" | tee -a "$REPORT"
+    printf "  ${RED}✗${R}  ${WHITE}%-14s${R}  ${RED}unreachable${R}\n" "$target"
+    log "  ✗  $target  unreachable"
   fi
 done
 
 dns_result=$(dig +short +time=3 +tries=1 cloudflare.com 2>/dev/null | grep -E "^[0-9]" | head -1 || echo "")
 if [ -n "$dns_result" ]; then
-  printf "    %-14s RESOLVING  (%s)\n" "DNS" "$dns_result" | tee -a "$REPORT"
+  printf "  ${GREEN}✓${R}  ${WHITE}%-14s${R}  ${DIM}cloudflare.com → %s${R}\n" "DNS" "$dns_result"
+  log "  ✓  DNS  cloudflare.com → $dns_result"
 else
-  printf "    %-14s FAILED\n" "DNS" | tee -a "$REPORT"
+  printf "  ${RED}✗${R}  ${WHITE}%-14s${R}  ${RED}resolution failed${R}\n" "DNS"
+  log "  ✗  DNS  resolution failed"
 fi
 
 # =============================================================================
 # GATEWAY HEALTH
 # =============================================================================
 if [ "$GATEWAY" != "unknown" ]; then
-  echo "" | tee -a "$REPORT"
-  echo "[*] Gateway health ($GATEWAY — 10 pings)..." | tee -a "$REPORT"
+  section "Gateway  ·  $GATEWAY"
+  spin_start "Sending 10 pings to $GATEWAY..."
   gw_result=$(ping -c 10 -W 1 "$GATEWAY" 2>/dev/null || echo "")
   gw_loss=$(echo "$gw_result" | grep "packet loss" | awk '{print $7}' || echo "—")
-  gw_avg=$(echo "$gw_result" | tail -1 | awk -F'/' '{print $5 "ms"}' 2>/dev/null || echo "—")
-  printf "    Packet loss: %-8s  Avg latency: %s\n" "$gw_loss" "$gw_avg" | tee -a "$REPORT"
+  gw_avg=$(echo "$gw_result" | tail -1 | awk -F'/' '{print $5}' 2>/dev/null || echo "—")
+  if [ "$gw_loss" = "0.0%" ]; then
+    spin_stop "0% packet loss  ·  ${gw_avg}ms avg"
+  else
+    spin_stop_warn "${gw_loss} packet loss  ·  ${gw_avg}ms avg"
+  fi
+  log "  Packet loss: $gw_loss  Avg: ${gw_avg}ms"
 fi
 
 # =============================================================================
-# NBTSCAN — optional, discover NetBIOS names
+# HELPERS
 # =============================================================================
-if [ "$NBTSCAN_AVAIL" = true ]; then
-  echo "" | tee -a "$REPORT"
-  echo "[*] NetBIOS scan..." | tee -a "$REPORT"
-  nbtscan -q "$SUBNET" 2>/dev/null | grep -v "^$" | grep -E "^[0-9]" | while IFS= read -r line; do
-    nb_ip=$(echo "$line" | awk '{print $1}')
-    nb_name=$(echo "$line" | awk '{print $2}')
-    echo "$nb_ip|$nb_name"
-  done > "$TMP_DIR/netbios.txt" || true
-fi
-
-# Helper: look up NetBIOS name for an IP
 get_netbios_name() {
   local ip="$1"
   [ -f "$TMP_DIR/netbios.txt" ] && grep "^${ip}|" "$TMP_DIR/netbios.txt" | cut -d'|' -f2 | head -1 || echo ""
 }
 
-# Helper: look up mDNS name for an IP via dscacheutil
 get_mdns_name() {
   local ip="$1"
   dscacheutil -q host -a ip_address "$ip" 2>/dev/null | awk '/^name:/{print $2}' | sed 's/\.$//' | head -1 || echo ""
 }
 
-# Helper: parse nmap grepable output into open_ports JSON array (always returns valid JSON)
 parse_ports_json() {
   local nmap_out="$1"
   local raw
@@ -144,7 +208,6 @@ parse_ports_json() {
   echo "$raw" | jq -Rcs '[split("\n")[] | select(length > 0)]' 2>/dev/null || echo "[]"
 }
 
-# Helper: parse nmap grepable output into services JSON object (always returns valid JSON)
 parse_services_json() {
   local nmap_out="$1"
   local pairs
@@ -163,18 +226,33 @@ parse_services_json() {
     2>/dev/null || echo "{}"
 }
 
-# Helper: validate JSON, return fallback if invalid
 validate_json() {
   local val="$1" fallback="$2"
   echo "$val" | jq -e . > /dev/null 2>&1 && echo "$val" || echo "$fallback"
 }
 
 # =============================================================================
+# NBTSCAN (optional)
+# =============================================================================
+if [ "$NBTSCAN_AVAIL" = true ]; then
+  spin_start "NetBIOS scan..."
+  nbtscan -q "$SUBNET" 2>/dev/null | grep -v "^$" | grep -E "^[0-9]" | while IFS= read -r line; do
+    nb_ip=$(echo "$line" | awk '{print $1}')
+    nb_name=$(echo "$line" | awk '{print $2}')
+    echo "$nb_ip|$nb_name"
+  done > "$TMP_DIR/netbios.txt" || true
+  spin_stop "NetBIOS scan complete"
+fi
+
+# =============================================================================
 # ARP SCAN
 # =============================================================================
-echo "" | tee -a "$REPORT"
-echo "[*] ARP scan on $SUBNET via $IFACE..." | tee -a "$REPORT"
+section "Discovery  ·  $SUBNET"
+
+spin_start "Running arp-scan on $SUBNET..."
 ARP_OUTPUT=$(arp-scan --interface="$IFACE" "$SUBNET" 2>/dev/null | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" || true)
+ARP_COUNT=$(echo "$ARP_OUTPUT" | grep -c "." 2>/dev/null || echo 0)
+spin_stop "ARP scan complete  ·  $ARP_COUNT devices found"
 
 NEW_DEVICES=()
 SEEN_MACS=()
@@ -184,7 +262,6 @@ while IFS=$'\t' read -r ip mac vendor; do
   [ -z "$ip" ] && continue
   SEEN_MACS+=("$mac")
 
-  # Hostname: try reverse DNS, then mDNS
   hostname=$(dig +short +time=2 +tries=1 -x "$ip" 2>/dev/null | sed 's/\.$//' || echo "")
   mdns_name=$(get_mdns_name "$ip")
   [ -z "$hostname" ] && hostname="${mdns_name:-unknown}"
@@ -193,7 +270,8 @@ while IFS=$'\t' read -r ip mac vendor; do
   exists=$(jq --arg mac "$mac" 'any(.[]; .mac == $mac)' "$DB")
 
   if [ "$exists" = "false" ]; then
-    echo "[+] NEW device: $ip ($mac) — scanning ports..." | tee -a "$REPORT"
+    printf "  ${YELLOW}⚠${R}  New device: ${WHITE}%s${R}  ${DIM}%s${R}  — scanning ports...\n" "$ip" "$mac"
+    log "  NEW: $ip  $mac  $vendor"
     nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
     ports_arr=$(validate_json "$(parse_ports_json "$nmap_out")" "[]")
     services_obj=$(validate_json "$(parse_services_json "$nmap_out")" "{}")
@@ -206,38 +284,26 @@ while IFS=$'\t' read -r ip mac vendor; do
        --argjson services "$services_obj" \
        --arg date "$TIMESTAMP" \
        '. += [{
-         "mac": $mac,
-         "ip": $ip,
-         "hostname": $hostname,
-         "mdns_name": $mdns_name,
-         "netbios_name": $netbios_name,
-         "vendor": $vendor,
-         "open_ports": $open_ports,
-         "services": $services,
-         "first_seen": $date,
-         "last_seen": $date,
-         "consecutive_up": 1,
-         "status": "up",
-         "notes": ""
+         "mac": $mac, "ip": $ip, "hostname": $hostname,
+         "mdns_name": $mdns_name, "netbios_name": $netbios_name,
+         "vendor": $vendor, "open_ports": $open_ports, "services": $services,
+         "first_seen": $date, "last_seen": $date,
+         "consecutive_up": 1, "status": "up", "notes": ""
        }]' "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
 
-    NEW_DEVICES+=("$ip ($mac) — $vendor")
+    NEW_DEVICES+=("$ip  $mac  $vendor")
   else
     jq --arg mac "$mac" --arg ip "$ip" --arg date "$TIMESTAMP" \
        --arg mdns_name "$mdns_name" --arg netbios_name "$netbios_name" \
        'map(if .mac == $mac then
-         .ip = $ip |
-         .last_seen = $date |
-         .status = "up" |
+         .ip = $ip | .last_seen = $date | .status = "up" |
          .consecutive_up = ((.consecutive_up // 0) + 1) |
          (if $mdns_name != "" then .mdns_name = $mdns_name else . end) |
          (if $netbios_name != "" then .netbios_name = $netbios_name else . end)
-       else . end)' \
-       "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
+       else . end)' "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
   fi
 done <<< "$ARP_OUTPUT"
 
-# Mark missing devices as down, reset consecutive_up
 ALL_MACS=$(jq -r '.[].mac' "$DB")
 for mac in $ALL_MACS; do
   seen=false
@@ -250,11 +316,8 @@ for mac in $ALL_MACS; do
 done
 
 # =============================================================================
-# NMAP REFRESH — all UP devices in parallel (skip newly scanned)
+# NMAP REFRESH — all UP devices in parallel
 # =============================================================================
-echo "" | tee -a "$REPORT"
-echo "[*] Refreshing ports + services on all UP devices..." | tee -a "$REPORT"
-
 UP_IPS=()
 while IFS= read -r ip; do
   already=false
@@ -262,40 +325,53 @@ while IFS= read -r ip; do
   [ "$already" = false ] && UP_IPS+=("$ip")
 done < <(jq -r '.[] | select(.status == "up") | .ip' "$DB")
 
-for ip in "${UP_IPS[@]:-}"; do
-  (
-    nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
-    ports_arr=$(validate_json "$(parse_ports_json "$nmap_out")" "[]")
-    services_obj=$(validate_json "$(parse_services_json "$nmap_out")" "{}")
-    printf '%s\n' "$ip" > "$TMP_DIR/${ip}.nmap"
-    printf '%s\n' "$ports_arr" >> "$TMP_DIR/${ip}.nmap"
-    printf '%s\n' "$services_obj" >> "$TMP_DIR/${ip}.nmap"
-  ) &
-done
-wait
+if [ ${#UP_IPS[@]} -gt 0 ]; then
+  NMAP_PIDS=()
+  for ip in "${UP_IPS[@]}"; do
+    (
+      nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
+      ports_arr=$(validate_json "$(parse_ports_json "$nmap_out")" "[]")
+      services_obj=$(validate_json "$(parse_services_json "$nmap_out")" "{}")
+      printf '%s\n' "$ip" > "$TMP_DIR/${ip}.nmap"
+      printf '%s\n' "$ports_arr" >> "$TMP_DIR/${ip}.nmap"
+      printf '%s\n' "$services_obj" >> "$TMP_DIR/${ip}.nmap"
+    ) &
+    NMAP_PIDS+=($!)
+  done
 
-for nmap_file in "$TMP_DIR"/*.nmap; do
-  [ -f "$nmap_file" ] || continue
-  ip=$(sed -n '1p' "$nmap_file")
-  ports_arr=$(sed -n '2p' "$nmap_file")
-  services_obj=$(sed -n '3p' "$nmap_file")
-  ports_arr=$(validate_json "${ports_arr}" "[]")
-  services_obj=$(validate_json "${services_obj}" "{}")
-  jq --arg ip "$ip" \
-     --argjson open_ports "$ports_arr" \
-     --argjson services "$services_obj" \
-     'map(if .ip == $ip then .open_ports = $open_ports | .services = $services else . end)' \
-     "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
-done
+  spin_start "Fingerprinting ${#UP_IPS[@]} devices via nmap -sV..."
+  for pid in "${NMAP_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  spin_stop "Port + service scan complete"
+
+  for nmap_file in "$TMP_DIR"/*.nmap; do
+    [ -f "$nmap_file" ] || continue
+    ip=$(sed -n '1p' "$nmap_file")
+    ports_arr=$(validate_json "$(sed -n '2p' "$nmap_file")" "[]")
+    services_obj=$(validate_json "$(sed -n '3p' "$nmap_file")" "{}")
+    jq --arg ip "$ip" \
+       --argjson open_ports "$ports_arr" \
+       --argjson services "$services_obj" \
+       'map(if .ip == $ip then .open_ports = $open_ports | .services = $services else . end)' \
+       "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
+  done
+fi
 
 # =============================================================================
-# PING HEALTH TABLE
+# DEVICE TABLE
 # =============================================================================
-echo "" | tee -a "$REPORT"
-echo "[*] Pinging all known devices..." | tee -a "$REPORT"
-echo "" | tee -a "$REPORT"
-printf "%-18s %-22s %-17s %-6s %-10s %s\n" "IP" "NAME" "MAC" "PING" "LATENCY" "STREAK" | tee -a "$REPORT"
-printf "%-18s %-22s %-17s %-6s %-10s %s\n" "--" "----" "---" "----" "-------" "------" | tee -a "$REPORT"
+section "Devices"
+
+TOTAL=$(jq 'length' "$DB")
+UP_COUNT=$(jq '[.[] | select(.status == "up")] | length' "$DB")
+DOWN_COUNT=$(jq '[.[] | select(.status == "down")] | length' "$DB")
+
+printf "  ${DIM}  %-18s %-22s %-17s %-4s  %-10s %s${R}\n" \
+  "IP" "NAME" "MAC" "    " "LATENCY" "STREAK"
+printf "  ${DIM}%s${R}\n" "──────────────────────────────────────────────────────────────────────"
+log "  IP                 NAME                   MAC                PING   LATENCY    STREAK"
+log "  ─────────────────────────────────────────────────────────────────────────"
 
 jq -c '.[]' "$DB" | while IFS= read -r device; do
   ip=$(echo "$device" | jq -r '.ip')
@@ -305,46 +381,59 @@ jq -c '.[]' "$DB" | while IFS= read -r device; do
   netbios_name=$(echo "$device" | jq -r '.netbios_name // ""')
   notes=$(echo "$device" | jq -r '.notes')
   consecutive_up=$(echo "$device" | jq -r '.consecutive_up // 0')
+  open_ports=$(echo "$device" | jq -r '.open_ports | join(", ")' 2>/dev/null || echo "")
 
-  # Best available display name
   display="$hostname"
-  [ -n "$mdns_name" ] && [ "$mdns_name" != "null" ] && display="$mdns_name"
-  [ -n "$netbios_name" ] && [ "$netbios_name" != "null" ] && display="$netbios_name"
-  [ "$display" = "unknown" ] && [ -n "$notes" ] && [ "$notes" != "null" ] && display="[$notes]"
-  [ ${#display} -gt 22 ] && display="${display:0:19}..."
+  [ -n "$mdns_name" ] && [ "$mdns_name" != "null" ] && [ "$mdns_name" != "" ] && display="$mdns_name"
+  [ -n "$netbios_name" ] && [ "$netbios_name" != "null" ] && [ "$netbios_name" != "" ] && display="$netbios_name"
+  [ "$display" = "unknown" ] && [ -n "$notes" ] && [ "$notes" != "null" ] && [ "$notes" != "" ] && display="$notes"
+  [ ${#display} -gt 20 ] && display="${display:0:17}..."
 
   ping_result=$(ping -c 2 -W 1 "$ip" 2>/dev/null | tail -1 || echo "")
   if echo "$ping_result" | grep -q "avg"; then
     latency=$(echo "$ping_result" | awk -F'/' '{print $5 "ms"}')
-    status="UP"
+    status_display="${GREEN}● UP${R}"
+    status_plain="UP"
   else
     latency="—"
-    status="DOWN"
+    status_display="${RED}○ DN${R}"
+    status_plain="DN"
   fi
 
-  printf "%-18s %-22s %-17s %-6s %-10s %s\n" "$ip" "$display" "$mac" "$status" "$latency" "${consecutive_up}x" | tee -a "$REPORT"
+  ports_display=""
+  [ -n "$open_ports" ] && ports_display="${DIM}  ${open_ports}${R}"
+
+  printf "  ${DIM}│${R}  %-18s ${BOLD}%-20s${R}  ${DIM}%-17s${R}  %b  %-10s ${DIM}%s${R}%b\n" \
+    "$ip" "$display" "$mac" "$status_display" "$latency" "${consecutive_up}x" "$ports_display"
+  log "  $(printf '%-18s %-22s %-17s %-6s %-10s %s' "$ip" "$display" "$mac" "$status_plain" "$latency" "${consecutive_up}x")"
 done
+
+printf "  ${DIM}%s${R}\n" "──────────────────────────────────────────────────────────────────────"
+log "  ─────────────────────────────────────────────────────────────────────────"
 
 # =============================================================================
 # SUMMARY
 # =============================================================================
-echo "" | tee -a "$REPORT"
-echo "------------------------------------------------------" | tee -a "$REPORT"
-total=$(jq 'length' "$DB")
-up=$(jq '[.[] | select(.status == "up")] | length' "$DB")
-down=$(jq '[.[] | select(.status == "down")] | length' "$DB")
-echo " Total known devices : $total" | tee -a "$REPORT"
-echo " Up                  : $up" | tee -a "$REPORT"
-echo " Down / not seen     : $down" | tee -a "$REPORT"
+printf "\n"
+printf "  ${BOLD}%d${R} devices  ${DIM}·${R}  ${GREEN}%d up${R}  ${DIM}·${R}  " "$TOTAL" "$UP_COUNT"
+if [ "$DOWN_COUNT" -gt 0 ]; then
+  printf "${RED}%d down${R}\n" "$DOWN_COUNT"
+else
+  printf "${DIM}0 down${R}\n"
+fi
+log ""
+log "  $TOTAL total  ·  $UP_COUNT up  ·  $DOWN_COUNT down"
 
 if [ ${#NEW_DEVICES[@]} -gt 0 ]; then
-  echo "" | tee -a "$REPORT"
-  echo " [!] NEW DEVICES DETECTED:" | tee -a "$REPORT"
+  printf "\n  ${YELLOW}⚠  New devices this scan:${R}\n"
+  log ""
+  log "  NEW DEVICES:"
   for d in "${NEW_DEVICES[@]}"; do
-    echo "     + $d" | tee -a "$REPORT"
+    printf "     ${DIM}%s${R}\n" "$d"
+    log "     $d"
   done
 fi
 
-echo "------------------------------------------------------" | tee -a "$REPORT"
-echo " Report saved to: $REPORT"
-echo "======================================================"
+printf "\n  ${DIM}Report → %s${R}\n\n" "$REPORT"
+log ""
+log "  Report: $REPORT"
