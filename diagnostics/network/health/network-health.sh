@@ -134,33 +134,39 @@ get_mdns_name() {
   dscacheutil -q host -a ip_address "$ip" 2>/dev/null | awk '/^name:/{print $2}' | sed 's/\.$//' | head -1 || echo ""
 }
 
-# Helper: parse nmap grepable output into open_ports JSON array
+# Helper: parse nmap grepable output into open_ports JSON array (always returns valid JSON)
 parse_ports_json() {
   local nmap_out="$1"
-  echo "$nmap_out" | grep "Ports:" | sed 's/.*Ports: //' | tr ',' '\n' | grep '/open/' | \
-    sed 's/^ *//' | cut -d'/' -f1 | tr -d ' ' | \
-    jq -Rcs '[split("\n")[] | select(length > 0)]' 2>/dev/null || echo "[]"
+  local raw
+  raw=$(echo "$nmap_out" | grep "Ports:" | sed 's/.*Ports: //' | tr ',' '\n' | grep '/open/' | \
+    sed 's/^ *//' | cut -d'/' -f1 | tr -d ' ' 2>/dev/null || true)
+  [ -z "$raw" ] && echo "[]" && return
+  echo "$raw" | jq -Rcs '[split("\n")[] | select(length > 0)]' 2>/dev/null || echo "[]"
 }
 
-# Helper: parse nmap grepable output into services JSON object {"port": "service version"}
+# Helper: parse nmap grepable output into services JSON object (always returns valid JSON)
 parse_services_json() {
   local nmap_out="$1"
   local pairs
   pairs=$(echo "$nmap_out" | grep "Ports:" | sed 's/.*Ports: //' | tr ',' '\n' | grep '/open/' | \
     sed 's/^ *//' | awk -F'/' '{
-      port=$1
-      svc=$5; ver=$6
+      port=$1; svc=$5; ver=$6
       gsub(/^ +| +$/, "", svc); gsub(/^ +| +$/, "", ver)
       if (length(ver) > 0 && ver != " ") svc = svc " " ver
       gsub(/^ +| +$/, "", svc)
       if (length(svc) == 0) svc = "unknown"
       print port "\t" svc
-    }' 2>/dev/null || echo "")
+    }' 2>/dev/null || true)
   [ -z "$pairs" ] && echo "{}" && return
-  # Build JSON object entirely in one jq call to guarantee compact single-line output
   echo "$pairs" | awk -F'\t' 'NF==2{print}' | \
     jq -Rcs '[split("\n")[] | select(length>0) | split("\t") | {(.[0]): (.[1])}] | add // {}' \
     2>/dev/null || echo "{}"
+}
+
+# Helper: validate JSON, return fallback if invalid
+validate_json() {
+  local val="$1" fallback="$2"
+  echo "$val" | jq -e . > /dev/null 2>&1 && echo "$val" || echo "$fallback"
 }
 
 # =============================================================================
@@ -189,8 +195,8 @@ while IFS=$'\t' read -r ip mac vendor; do
   if [ "$exists" = "false" ]; then
     echo "[+] NEW device: $ip ($mac) — scanning ports..." | tee -a "$REPORT"
     nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
-    ports_arr=$(parse_ports_json "$nmap_out")
-    services_obj=$(parse_services_json "$nmap_out")
+    ports_arr=$(validate_json "$(parse_ports_json "$nmap_out")" "[]")
+    services_obj=$(validate_json "$(parse_services_json "$nmap_out")" "{}")
     NEWLY_SCANNED_IPS+=("$ip")
 
     jq --arg ip "$ip" --arg mac "$mac" --arg vendor "$vendor" \
@@ -259,8 +265,8 @@ done < <(jq -r '.[] | select(.status == "up") | .ip' "$DB")
 for ip in "${UP_IPS[@]:-}"; do
   (
     nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
-    ports_arr=$(parse_ports_json "$nmap_out")
-    services_obj=$(parse_services_json "$nmap_out")
+    ports_arr=$(validate_json "$(parse_ports_json "$nmap_out")" "[]")
+    services_obj=$(validate_json "$(parse_services_json "$nmap_out")" "{}")
     printf '%s\n' "$ip" > "$TMP_DIR/${ip}.nmap"
     printf '%s\n' "$ports_arr" >> "$TMP_DIR/${ip}.nmap"
     printf '%s\n' "$services_obj" >> "$TMP_DIR/${ip}.nmap"
@@ -273,8 +279,8 @@ for nmap_file in "$TMP_DIR"/*.nmap; do
   ip=$(sed -n '1p' "$nmap_file")
   ports_arr=$(sed -n '2p' "$nmap_file")
   services_obj=$(sed -n '3p' "$nmap_file")
-  [ -z "$ports_arr" ] && ports_arr="[]"
-  [ -z "$services_obj" ] && services_obj="{}"
+  ports_arr=$(validate_json "${ports_arr}" "[]")
+  services_obj=$(validate_json "${services_obj}" "{}")
   jq --arg ip "$ip" \
      --argjson open_ports "$ports_arr" \
      --argjson services "$services_obj" \
