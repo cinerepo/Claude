@@ -2,8 +2,6 @@
 
 # =============================================================================
 # network-health.sh — Cinesys Network Health Agent (macOS)
-# Scans the local network, maintains a client database, and reports health.
-# Usage: ./network-health.sh
 # =============================================================================
 
 set -euo pipefail
@@ -13,23 +11,24 @@ DB="$SCRIPT_DIR/clients.json"
 REPORTS_DIR="$SCRIPT_DIR/reports"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 REPORT="$REPORTS_DIR/report_$TIMESTAMP.txt"
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p "$REPORTS_DIR"
-
-# Init DB if missing
 [ ! -f "$DB" ] && echo "[]" > "$DB"
 
-# Check dependencies
-for cmd in arp-scan nmap jq ping; do
+for cmd in arp-scan nmap jq ping dig; do
   if ! command -v "$cmd" &>/dev/null; then
-    echo "[ERROR] Missing dependency: $cmd — install with: brew install $cmd"
+    echo "[ERROR] Missing: $cmd — brew install $cmd"
     exit 1
   fi
 done
 
+NBTSCAN_AVAIL=false
+command -v nbtscan &>/dev/null && NBTSCAN_AVAIL=true
+
 # =============================================================================
-# INTERFACE + SUBNET DETECTION
-# Finds the first active non-loopback en* interface with an inet address
+# INTERFACE DETECTION
 # =============================================================================
 detect_interface() {
   local current_iface=""
@@ -39,120 +38,274 @@ detect_interface() {
     elif [[ -n "$current_iface" && "$line" =~ inet[[:space:]]([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)[[:space:]]netmask[[:space:]](0x[0-9a-fA-F]+) ]]; then
       local ip="${BASH_REMATCH[1]}"
       local mask_hex="${BASH_REMATCH[2]#0x}"
-      # Convert hex mask to CIDR prefix length
       local mask_dec=$((16#$mask_hex))
       local cidr=0
       for i in {0..31}; do
         (( (mask_dec >> (31 - i)) & 1 )) && ((cidr++)) || true
       done
-      # Derive network base address
       IFS='.' read -r o1 o2 o3 o4 <<< "$ip"
-      local net_base="$o1.$o2.$o3.0"
-      echo "$current_iface $ip $net_base/$cidr"
+      echo "$current_iface $ip $o1.$o2.$o3.0/$cidr"
       return
     fi
   done < <(ifconfig 2>/dev/null | grep -E "^en[0-9]+:|inet " | grep -v inet6)
-  echo ""
 }
 
 IFACE_INFO=$(detect_interface)
 if [ -z "$IFACE_INFO" ]; then
-  echo "[ERROR] No active network interface found."
+  echo "[ERROR] No active interface found."
   exit 1
 fi
-
 IFACE=$(echo "$IFACE_INFO" | awk '{print $1}')
 LOCAL_IP=$(echo "$IFACE_INFO" | awk '{print $2}')
 SUBNET=$(echo "$IFACE_INFO" | awk '{print $3}')
+GATEWAY=$(route -n get default 2>/dev/null | awk '/gateway:/{print $2}' | head -1 || echo "unknown")
 
 # =============================================================================
-# SCAN
+# HEADER
 # =============================================================================
-echo "======================================================" | tee "$REPORT"
-echo " Cinesys Network Health Report — $TIMESTAMP"         | tee -a "$REPORT"
-echo "======================================================" | tee -a "$REPORT"
-echo " Interface : $IFACE"                                  | tee -a "$REPORT"
-echo " Local IP  : $LOCAL_IP"                               | tee -a "$REPORT"
-echo " Subnet    : $SUBNET"                                 | tee -a "$REPORT"
-echo "------------------------------------------------------" | tee -a "$REPORT"
+{
+  echo "======================================================"
+  echo " Cinesys Network Health Report — $TIMESTAMP"
+  echo "======================================================"
+  echo " Interface : $IFACE"
+  echo " Local IP  : $LOCAL_IP"
+  echo " Subnet    : $SUBNET"
+  echo " Gateway   : $GATEWAY"
+  echo "------------------------------------------------------"
+} | tee "$REPORT"
 
-echo ""
-echo "[*] Running arp-scan on $SUBNET via $IFACE..."
+# =============================================================================
+# INTERNET + DNS HEALTH
+# =============================================================================
+echo "" | tee -a "$REPORT"
+echo "[*] Internet + DNS health..." | tee -a "$REPORT"
+
+for target in "1.1.1.1" "8.8.8.8"; do
+  result=$(ping -c 3 -W 1 "$target" 2>/dev/null | tail -1 || echo "")
+  if echo "$result" | grep -q "avg"; then
+    latency=$(echo "$result" | awk -F'/' '{print $5 "ms"}')
+    printf "    %-14s UP        %s\n" "$target" "$latency" | tee -a "$REPORT"
+  else
+    printf "    %-14s UNREACHABLE\n" "$target" | tee -a "$REPORT"
+  fi
+done
+
+dns_result=$(dig +short +time=3 +tries=1 cloudflare.com 2>/dev/null | grep -E "^[0-9]" | head -1 || echo "")
+if [ -n "$dns_result" ]; then
+  printf "    %-14s RESOLVING  (%s)\n" "DNS" "$dns_result" | tee -a "$REPORT"
+else
+  printf "    %-14s FAILED\n" "DNS" | tee -a "$REPORT"
+fi
+
+# =============================================================================
+# GATEWAY HEALTH
+# =============================================================================
+if [ "$GATEWAY" != "unknown" ]; then
+  echo "" | tee -a "$REPORT"
+  echo "[*] Gateway health ($GATEWAY — 10 pings)..." | tee -a "$REPORT"
+  gw_result=$(ping -c 10 -W 1 "$GATEWAY" 2>/dev/null || echo "")
+  gw_loss=$(echo "$gw_result" | grep "packet loss" | awk '{print $7}' || echo "—")
+  gw_avg=$(echo "$gw_result" | tail -1 | awk -F'/' '{print $5 "ms"}' 2>/dev/null || echo "—")
+  printf "    Packet loss: %-8s  Avg latency: %s\n" "$gw_loss" "$gw_avg" | tee -a "$REPORT"
+fi
+
+# =============================================================================
+# NBTSCAN — optional, discover NetBIOS names
+# =============================================================================
+if [ "$NBTSCAN_AVAIL" = true ]; then
+  echo "" | tee -a "$REPORT"
+  echo "[*] NetBIOS scan..." | tee -a "$REPORT"
+  nbtscan -q "$SUBNET" 2>/dev/null | grep -v "^$" | grep -E "^[0-9]" | while IFS= read -r line; do
+    nb_ip=$(echo "$line" | awk '{print $1}')
+    nb_name=$(echo "$line" | awk '{print $2}')
+    echo "$nb_ip|$nb_name"
+  done > "$TMP_DIR/netbios.txt" || true
+fi
+
+# Helper: look up NetBIOS name for an IP
+get_netbios_name() {
+  local ip="$1"
+  [ -f "$TMP_DIR/netbios.txt" ] && grep "^${ip}|" "$TMP_DIR/netbios.txt" | cut -d'|' -f2 | head -1 || echo ""
+}
+
+# Helper: look up mDNS name for an IP via dscacheutil
+get_mdns_name() {
+  local ip="$1"
+  dscacheutil -q host -a ip_address "$ip" 2>/dev/null | awk '/^name:/{print $2}' | sed 's/\.$//' | head -1 || echo ""
+}
+
+# Helper: parse nmap grepable output into open_ports JSON array
+parse_ports_json() {
+  local nmap_out="$1"
+  echo "$nmap_out" | grep "Ports:" | sed 's/.*Ports: //' | tr ',' '\n' | grep '/open/' | \
+    sed 's/^ *//' | cut -d'/' -f1 | tr -d ' ' | \
+    jq -Rcs '[split("\n")[] | select(length > 0)]' 2>/dev/null || echo "[]"
+}
+
+# Helper: parse nmap grepable output into services JSON object {"port": "service version"}
+parse_services_json() {
+  local nmap_out="$1"
+  local pairs
+  pairs=$(echo "$nmap_out" | grep "Ports:" | sed 's/.*Ports: //' | tr ',' '\n' | grep '/open/' | \
+    sed 's/^ *//' | awk -F'/' '{
+      port=$1
+      svc=$5; ver=$6
+      gsub(/^ +| +$/, "", svc); gsub(/^ +| +$/, "", ver)
+      if (length(ver) > 0 && ver != " ") svc = svc " " ver
+      gsub(/^ +| +$/, "", svc)
+      if (length(svc) == 0) svc = "unknown"
+      print port "\t" svc
+    }' 2>/dev/null || echo "")
+  [ -z "$pairs" ] && echo "{}" && return
+  # Build JSON object entirely in one jq call to guarantee compact single-line output
+  echo "$pairs" | awk -F'\t' 'NF==2{print}' | \
+    jq -Rcs '[split("\n")[] | select(length>0) | split("\t") | {(.[0]): (.[1])}] | add // {}' \
+    2>/dev/null || echo "{}"
+}
+
+# =============================================================================
+# ARP SCAN
+# =============================================================================
+echo "" | tee -a "$REPORT"
+echo "[*] ARP scan on $SUBNET via $IFACE..." | tee -a "$REPORT"
 ARP_OUTPUT=$(arp-scan --interface="$IFACE" "$SUBNET" 2>/dev/null | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" || true)
 
-# =============================================================================
-# PARSE ARP RESULTS + UPDATE DATABASE
-# =============================================================================
 NEW_DEVICES=()
 SEEN_MACS=()
+NEWLY_SCANNED_IPS=()
 
 while IFS=$'\t' read -r ip mac vendor; do
   [ -z "$ip" ] && continue
   SEEN_MACS+=("$mac")
 
-  # Try reverse DNS for hostname
-  hostname=$(dig +short +time=2 +tries=1 -x "$ip" 2>/dev/null | sed 's/\.$//' || echo "unknown")
-  [ -z "$hostname" ] && hostname="unknown"
+  # Hostname: try reverse DNS, then mDNS
+  hostname=$(dig +short +time=2 +tries=1 -x "$ip" 2>/dev/null | sed 's/\.$//' || echo "")
+  mdns_name=$(get_mdns_name "$ip")
+  [ -z "$hostname" ] && hostname="${mdns_name:-unknown}"
+  netbios_name=$(get_netbios_name "$ip")
 
   exists=$(jq --arg mac "$mac" 'any(.[]; .mac == $mac)' "$DB")
 
   if [ "$exists" = "false" ]; then
-    # New device — run nmap to get open ports
-    echo "[+] NEW device found: $ip ($mac) — scanning ports..."
-    ports=$(nmap -sT --open -oG - "$ip" 2>/dev/null | grep "Ports:" | sed 's/.*Ports: //' | tr ',' '\n' | grep '/open/' | sed 's|/.*||' | tr '\n' ',' | sed 's/,$//' || echo "")
+    echo "[+] NEW device: $ip ($mac) — scanning ports..." | tee -a "$REPORT"
+    nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
+    ports_arr=$(parse_ports_json "$nmap_out")
+    services_obj=$(parse_services_json "$nmap_out")
+    NEWLY_SCANNED_IPS+=("$ip")
 
     jq --arg ip "$ip" --arg mac "$mac" --arg vendor "$vendor" \
-       --arg hostname "$hostname" --arg ports "$ports" \
+       --arg hostname "$hostname" --arg mdns_name "$mdns_name" \
+       --arg netbios_name "$netbios_name" \
+       --argjson open_ports "$ports_arr" \
+       --argjson services "$services_obj" \
        --arg date "$TIMESTAMP" \
        '. += [{
          "mac": $mac,
          "ip": $ip,
          "hostname": $hostname,
+         "mdns_name": $mdns_name,
+         "netbios_name": $netbios_name,
          "vendor": $vendor,
-         "open_ports": ($ports | split(",") | map(select(length > 0))),
+         "open_ports": $open_ports,
+         "services": $services,
          "first_seen": $date,
          "last_seen": $date,
+         "consecutive_up": 1,
          "status": "up",
          "notes": ""
        }]' "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
 
     NEW_DEVICES+=("$ip ($mac) — $vendor")
   else
-    # Known device — update IP, last_seen, status
     jq --arg mac "$mac" --arg ip "$ip" --arg date "$TIMESTAMP" \
-       'map(if .mac == $mac then .ip = $ip | .last_seen = $date | .status = "up" else . end)' \
+       --arg mdns_name "$mdns_name" --arg netbios_name "$netbios_name" \
+       'map(if .mac == $mac then
+         .ip = $ip |
+         .last_seen = $date |
+         .status = "up" |
+         .consecutive_up = ((.consecutive_up // 0) + 1) |
+         (if $mdns_name != "" then .mdns_name = $mdns_name else . end) |
+         (if $netbios_name != "" then .netbios_name = $netbios_name else . end)
+       else . end)' \
        "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
   fi
 done <<< "$ARP_OUTPUT"
 
-# Mark devices not seen in this scan as down
+# Mark missing devices as down, reset consecutive_up
 ALL_MACS=$(jq -r '.[].mac' "$DB")
 for mac in $ALL_MACS; do
   seen=false
-  for s in "${SEEN_MACS[@]:-}"; do
-    [ "$s" = "$mac" ] && seen=true && break
-  done
+  for s in "${SEEN_MACS[@]:-}"; do [ "$s" = "$mac" ] && seen=true && break; done
   if [ "$seen" = "false" ]; then
     jq --arg mac "$mac" --arg date "$TIMESTAMP" \
-       'map(if .mac == $mac then .status = "down" | .last_seen = $date else . end)' \
+       'map(if .mac == $mac then .status = "down" | .last_seen = $date | .consecutive_up = 0 else . end)' \
        "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
   fi
 done
 
 # =============================================================================
-# HEALTH CHECK — PING ALL KNOWN DEVICES
+# NMAP REFRESH — all UP devices in parallel (skip newly scanned)
 # =============================================================================
 echo "" | tee -a "$REPORT"
-echo "[*] Health check — pinging all known devices..." | tee -a "$REPORT"
+echo "[*] Refreshing ports + services on all UP devices..." | tee -a "$REPORT"
+
+UP_IPS=()
+while IFS= read -r ip; do
+  already=false
+  for scanned in "${NEWLY_SCANNED_IPS[@]:-}"; do [ "$scanned" = "$ip" ] && already=true && break; done
+  [ "$already" = false ] && UP_IPS+=("$ip")
+done < <(jq -r '.[] | select(.status == "up") | .ip' "$DB")
+
+for ip in "${UP_IPS[@]:-}"; do
+  (
+    nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
+    ports_arr=$(parse_ports_json "$nmap_out")
+    services_obj=$(parse_services_json "$nmap_out")
+    printf '%s\n' "$ip" > "$TMP_DIR/${ip}.nmap"
+    printf '%s\n' "$ports_arr" >> "$TMP_DIR/${ip}.nmap"
+    printf '%s\n' "$services_obj" >> "$TMP_DIR/${ip}.nmap"
+  ) &
+done
+wait
+
+for nmap_file in "$TMP_DIR"/*.nmap; do
+  [ -f "$nmap_file" ] || continue
+  ip=$(sed -n '1p' "$nmap_file")
+  ports_arr=$(sed -n '2p' "$nmap_file")
+  services_obj=$(sed -n '3p' "$nmap_file")
+  [ -z "$ports_arr" ] && ports_arr="[]"
+  [ -z "$services_obj" ] && services_obj="{}"
+  jq --arg ip "$ip" \
+     --argjson open_ports "$ports_arr" \
+     --argjson services "$services_obj" \
+     'map(if .ip == $ip then .open_ports = $open_ports | .services = $services else . end)' \
+     "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
+done
+
+# =============================================================================
+# PING HEALTH TABLE
+# =============================================================================
 echo "" | tee -a "$REPORT"
-printf "%-18s %-20s %-17s %-6s %-s\n" "IP" "HOSTNAME" "MAC" "STATUS" "LATENCY" | tee -a "$REPORT"
-printf "%-18s %-20s %-17s %-6s %-s\n" "--" "--------" "---" "------" "-------" | tee -a "$REPORT"
+echo "[*] Pinging all known devices..." | tee -a "$REPORT"
+echo "" | tee -a "$REPORT"
+printf "%-18s %-22s %-17s %-6s %-10s %s\n" "IP" "NAME" "MAC" "PING" "LATENCY" "STREAK" | tee -a "$REPORT"
+printf "%-18s %-22s %-17s %-6s %-10s %s\n" "--" "----" "---" "----" "-------" "------" | tee -a "$REPORT"
 
 jq -c '.[]' "$DB" | while IFS= read -r device; do
   ip=$(echo "$device" | jq -r '.ip')
   mac=$(echo "$device" | jq -r '.mac')
   hostname=$(echo "$device" | jq -r '.hostname')
-  [ ${#hostname} -gt 20 ] && hostname="${hostname:0:17}..."
+  mdns_name=$(echo "$device" | jq -r '.mdns_name // ""')
+  netbios_name=$(echo "$device" | jq -r '.netbios_name // ""')
+  notes=$(echo "$device" | jq -r '.notes')
+  consecutive_up=$(echo "$device" | jq -r '.consecutive_up // 0')
+
+  # Best available display name
+  display="$hostname"
+  [ -n "$mdns_name" ] && [ "$mdns_name" != "null" ] && display="$mdns_name"
+  [ -n "$netbios_name" ] && [ "$netbios_name" != "null" ] && display="$netbios_name"
+  [ "$display" = "unknown" ] && [ -n "$notes" ] && [ "$notes" != "null" ] && display="[$notes]"
+  [ ${#display} -gt 22 ] && display="${display:0:19}..."
 
   ping_result=$(ping -c 2 -W 1 "$ip" 2>/dev/null | tail -1 || echo "")
   if echo "$ping_result" | grep -q "avg"; then
@@ -163,7 +316,7 @@ jq -c '.[]' "$DB" | while IFS= read -r device; do
     status="DOWN"
   fi
 
-  printf "%-18s %-20s %-17s %-6s %-s\n" "$ip" "$hostname" "$mac" "$status" "$latency" | tee -a "$REPORT"
+  printf "%-18s %-22s %-17s %-6s %-10s %s\n" "$ip" "$display" "$mac" "$status" "$latency" "${consecutive_up}x" | tee -a "$REPORT"
 done
 
 # =============================================================================
@@ -180,7 +333,7 @@ echo " Down / not seen     : $down" | tee -a "$REPORT"
 
 if [ ${#NEW_DEVICES[@]} -gt 0 ]; then
   echo "" | tee -a "$REPORT"
-  echo " [!] NEW DEVICES DETECTED THIS SCAN:" | tee -a "$REPORT"
+  echo " [!] NEW DEVICES DETECTED:" | tee -a "$REPORT"
   for d in "${NEW_DEVICES[@]}"; do
     echo "     + $d" | tee -a "$REPORT"
   done
