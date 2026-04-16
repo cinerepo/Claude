@@ -1,5 +1,5 @@
 # Repo Snapshot — cinerepo/claude
-Generated: 2026-04-16 18:14 UTC
+Generated: 2026-04-16 20:40 UTC
 
 ## Branches
 
@@ -11,12 +11,12 @@ Generated: 2026-04-16 18:14 UTC
 - `claude/notion-manager-mK3pX` — 63179e3 feat: populate Notion workspace topology from live scan (202
 - `claude/personal-assistant-setup-w1xeS` — e640ba9 feat: add CLAUDE.md agent registry for persistent session me
 - `claude/pit-boss-grill-assistant-JWKAO` — dddc75b feat: add Pit Boss GX700 grill assistant reference guide
-- `main` — 5d45816 updating main repo to include all new agents .md file
+- `main` — 1ab8761 updating main repo to include the repo-snapshot.md.... someh
 
 ## Recent Commits (main)
 
+- `1ab8761` updating main repo to include the repo-snapshot.md.... somehow the last 
 - `5d45816` updating main repo to include all new agents .md file
 - `d435c2e` feat: move network-security.sh to main
 - `3750477` feat: add network-client.sh — client-side diagnostics, no port scanning
 - `1e47024` feat: polished CLI output with live spinners and color
-- `be6b73a` data: network health scan 2026-03-29_21-51-55
