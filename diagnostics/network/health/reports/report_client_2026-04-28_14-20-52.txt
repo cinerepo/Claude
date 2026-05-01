@@ -1,0 +1,60 @@
+======================================================
+ Cinesys Client Diagnostics — 2026-04-28_14-20-52
+======================================================
+ Interface : en0    IP : 10.1.88.102    Subnet : 10.1.88.0/24
+ Gateway   : 10.1.88.1
+======================================================
+
+Interface  ·  en0
+──────────────────────────────────────────────────────────
+  ·  MAC      6e:4d:ab:87:be:a7
+  ·  IP       10.1.88.102 / 10.1.88.0/24
+  ·  MTU      1500 bytes
+  ·  MSS      1460 bytes  (MTU − 40)
+  ·  Gateway  10.1.88.1
+  ·  Media    autoselect
+
+Interface Stats
+──────────────────────────────────────────────────────────
+  ·  RX packets   18318328
+  ·  TX packets   10562443
+  ✓  RX errors    0
+  ✓  TX errors    0
+  ✓  Collisions   0
+
+Firewall
+──────────────────────────────────────────────────────────
+  ⚠  Application Firewall   disabled
+  ·  Stealth mode           disabled
+  ·  Block all incoming     disabled
+
+Routing
+──────────────────────────────────────────────────────────
+  ·  Default gateway    10.1.88.1  via  en7
+  ·  Active routes      43
+  ⚠  Multiple default routes detected (8)
+
+Internet Connectivity
+──────────────────────────────────────────────────────────
+  ✓  1.1.1.1   10.484ms avg   loss 0.0%
+  ✓  8.8.8.8   8.412ms avg   loss 0.0%
+
+DNS
+──────────────────────────────────────────────────────────
+  ✓  1.1.1.1   10ms
+  ✓  8.8.8.8   32ms
+  ✓  local  (10.1.88.1)   11ms
+
+Gateway  ·  10.1.88.1
+──────────────────────────────────────────────────────────
+  ·  Min / Avg / Max   stddev = 0.394 / 0.560 / 0.783 ms
+  ·  Jitter            0.109ms  (stddev)
+  ⚠  Packet loss to gateway: 10.0%
+
+Path MTU
+──────────────────────────────────────────────────────────
+  ·  Path MTU   probe inconclusive — ICMP DF-bit filtering suspected
+  ·  Local MTU  1500 bytes  ·  MSS  1460 bytes
+
+Traceroute  ·  1.1.1.1  (8 hops max)
+──────────────────────────────────────────────────────────

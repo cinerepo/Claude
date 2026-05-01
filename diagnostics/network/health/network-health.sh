@@ -315,48 +315,7 @@ for mac in $ALL_MACS; do
   fi
 done
 
-# =============================================================================
-# NMAP REFRESH — all UP devices in parallel
-# =============================================================================
-UP_IPS=()
-while IFS= read -r ip; do
-  already=false
-  for scanned in "${NEWLY_SCANNED_IPS[@]:-}"; do [ "$scanned" = "$ip" ] && already=true && break; done
-  [ "$already" = false ] && UP_IPS+=("$ip")
-done < <(jq -r '.[] | select(.status == "up") | .ip' "$DB")
-
-if [ ${#UP_IPS[@]} -gt 0 ]; then
-  NMAP_PIDS=()
-  for ip in "${UP_IPS[@]}"; do
-    (
-      nmap_out=$(nmap -T4 -sT --open -sV -oG - "$ip" 2>/dev/null || echo "")
-      ports_arr=$(validate_json "$(parse_ports_json "$nmap_out")" "[]")
-      services_obj=$(validate_json "$(parse_services_json "$nmap_out")" "{}")
-      printf '%s\n' "$ip" > "$TMP_DIR/${ip}.nmap"
-      printf '%s\n' "$ports_arr" >> "$TMP_DIR/${ip}.nmap"
-      printf '%s\n' "$services_obj" >> "$TMP_DIR/${ip}.nmap"
-    ) &
-    NMAP_PIDS+=($!)
-  done
-
-  spin_start "Fingerprinting ${#UP_IPS[@]} devices via nmap -sV..."
-  for pid in "${NMAP_PIDS[@]}"; do
-    wait "$pid" 2>/dev/null || true
-  done
-  spin_stop "Port + service scan complete"
-
-  for nmap_file in "$TMP_DIR"/*.nmap; do
-    [ -f "$nmap_file" ] || continue
-    ip=$(sed -n '1p' "$nmap_file")
-    ports_arr=$(validate_json "$(sed -n '2p' "$nmap_file")" "[]")
-    services_obj=$(validate_json "$(sed -n '3p' "$nmap_file")" "{}")
-    jq --arg ip "$ip" \
-       --argjson open_ports "$ports_arr" \
-       --argjson services "$services_obj" \
-       'map(if .ip == $ip then .open_ports = $open_ports | .services = $services else . end)' \
-       "$DB" > "${DB}.tmp" && mv "${DB}.tmp" "$DB"
-  done
-fi
+# nmap only runs on new devices (handled during discovery above)
 
 # =============================================================================
 # DEVICE TABLE

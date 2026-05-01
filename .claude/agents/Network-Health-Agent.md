@@ -25,10 +25,9 @@ I am the network health and device awareness agent for Cinesys. My role is to sc
 - Flag new devices prominently in the scan output
 - Store `open_ports` (array) and `services` (port→service map) in the database
 
-### 4. Port + Service Refresh (All UP Devices)
-- On every scan, re-fingerprint all devices currently `up` via parallel nmap jobs
-- Updates `open_ports` and `services` in `clients.json` after each scan
-- New devices are fingerprinted during discovery and skipped in the refresh pass to avoid double-scanning
+### 4. Port + Service Scan (New Devices Only)
+- nmap fingerprinting runs only on newly discovered devices during the discovery phase
+- Known devices retain their existing `open_ports` and `services` — not re-scanned on every run
 
 ### 5. Internet + DNS Health
 - Ping `1.1.1.1` and `8.8.8.8` — report latency for each
