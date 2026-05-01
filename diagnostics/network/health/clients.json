@@ -10,7 +10,7 @@
       "443"
     ],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-04-16_15-41-46",
+    "last_seen": "2026-04-16_17-22-40",
     "status": "up",
     "notes": "",
     "mdns_name": "",
@@ -20,7 +20,7 @@
       "80": "http",
       "443": "ssl|http"
     },
-    "consecutive_up": 5
+    "consecutive_up": 7
   },
   {
     "mac": "0c:91:60:73:65:0e",
@@ -33,7 +33,7 @@
       "8081"
     ],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-04-16_15-41-46",
+    "last_seen": "2026-04-16_17-22-40",
     "status": "up",
     "notes": "",
     "mdns_name": "",
@@ -43,7 +43,7 @@
       "554": "rtsp",
       "8081": "blackice-icecap?"
     },
-    "consecutive_up": 5
+    "consecutive_up": 8
   },
   {
     "mac": "ce:95:30:7f:5d:5a",
@@ -55,8 +55,8 @@
       "62078"
     ],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-04-16_15-41-46",
-    "status": "down",
+    "last_seen": "2026-04-16_17-22-40",
+    "status": "up",
     "notes": "",
     "mdns_name": "",
     "netbios_name": "",
@@ -64,7 +64,7 @@
       "49152": "tcpwrapped",
       "62078": "tcpwrapped"
     },
-    "consecutive_up": 0
+    "consecutive_up": 1
   },
   {
     "mac": "94:bd:be:b1:43:c9",
@@ -73,13 +73,13 @@
     "vendor": "(Unknown)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-04-16_15-41-46",
+    "last_seen": "2026-04-16_17-22-40",
     "status": "up",
     "notes": "Adalynn's TV",
     "mdns_name": "",
     "netbios_name": "",
     "services": {},
-    "consecutive_up": 5
+    "consecutive_up": 7
   },
   {
     "mac": "fc:e9:d8:53:e7:7a",
@@ -88,13 +88,13 @@
     "vendor": "Amazon Technologies Inc.",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-04-16_15-41-46",
+    "last_seen": "2026-04-16_17-22-40",
     "status": "up",
     "notes": "",
     "mdns_name": "",
     "netbios_name": "",
     "services": {},
-    "consecutive_up": 5
+    "consecutive_up": 7
   },
   {
     "mac": "d4:f9:21:b7:88:26",
@@ -103,13 +103,13 @@
     "vendor": "(Unknown)",
     "open_ports": [],
     "first_seen": "2026-03-27_23-42-06",
-    "last_seen": "2026-04-16_15-41-46",
+    "last_seen": "2026-04-16_17-22-40",
     "status": "up",
     "notes": "",
     "mdns_name": "",
     "netbios_name": "",
     "services": {},
-    "consecutive_up": 5
+    "consecutive_up": 7
   },
   {
     "mac": "2c:d1:c6:44:b4:10",
@@ -120,7 +120,7 @@
       "80"
     ],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-04-16_15-41-46",
+    "last_seen": "2026-04-16_17-22-40",
     "status": "down",
     "notes": "",
     "mdns_name": "",
@@ -137,13 +137,13 @@
     "vendor": "Texas Instruments",
     "open_ports": [],
     "first_seen": "2026-03-27_23-58-23",
-    "last_seen": "2026-04-16_15-41-46",
+    "last_seen": "2026-04-16_17-22-40",
     "status": "up",
     "notes": "",
     "mdns_name": "",
     "netbios_name": "",
     "services": {},
-    "consecutive_up": 2
+    "consecutive_up": 1
   },
   {
     "mac": "9a:47:68:8e:9e:63",
@@ -152,13 +152,13 @@
     "vendor": "(Unknown: locally administered)",
     "open_ports": [],
     "first_seen": "2026-03-29_10-53-36",
-    "last_seen": "2026-04-16_15-41-46",
-    "status": "down",
+    "last_seen": "2026-04-16_17-22-40",
+    "status": "up",
     "notes": "",
     "mdns_name": "",
     "netbios_name": "",
     "services": {},
-    "consecutive_up": 0
+    "consecutive_up": 2
   },
   {
     "mac": "48:5f:2d:f5:19:02",
@@ -170,8 +170,8 @@
     "open_ports": [],
     "services": {},
     "first_seen": "2026-03-29_21-51-55",
-    "last_seen": "2026-04-16_15-41-46",
-    "consecutive_up": 3,
+    "last_seen": "2026-04-16_17-22-40",
+    "consecutive_up": 5,
     "status": "up",
     "notes": ""
   },
@@ -195,8 +195,8 @@
       "445": "netbios-ssn"
     },
     "first_seen": "2026-04-16_15-41-46",
-    "last_seen": "2026-04-16_15-41-46",
-    "consecutive_up": 1,
+    "last_seen": "2026-04-16_17-22-40",
+    "consecutive_up": 3,
     "status": "up",
     "notes": ""
   }
