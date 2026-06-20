@@ -1,0 +1,125 @@
+"""
+Classification engine.
+Reads rules.yaml + consumer_oui_vendors.txt and classifies each ObservedAsset.
+Returns (classification, reason) — never writes to DB itself.
+"""
+import yaml
+from dataclasses import dataclass
+from typing import Optional
+from staging import ObservedAsset
+
+
+@dataclass
+class VlanPolicy:
+    intent: str              # infrastructure / lab / corporate / ignore
+    default_role: str = "Server"
+    default_site: str = "Unknown"
+    description: str = ""
+
+
+@dataclass
+class Rules:
+    vlan_policy: dict[str, VlanPolicy]
+    gateway_suffixes: list[str]
+    ip_inventory_subnets: list[str]
+
+
+def load_rules(rules_file: str) -> Rules:
+    with open(rules_file) as f:
+        raw = yaml.safe_load(f)
+
+    policies = {}
+    for vid, cfg in raw.get("vlan_policy", {}).items():
+        policies[str(vid)] = VlanPolicy(
+            intent=cfg.get("intent", "unclassified"),
+            default_role=cfg.get("default_role", "Server"),
+            default_site=cfg.get("default_site", "Unknown"),
+            description=cfg.get("description", ""),
+        )
+
+    return Rules(
+        vlan_policy=policies,
+        gateway_suffixes=raw.get("gateway_suffixes", [".1", ".2"]),
+        ip_inventory_subnets=raw.get("ip_inventory_subnets", []),
+    )
+
+
+def load_consumer_vendors(vendors_file: str) -> list[str]:
+    try:
+        with open(vendors_file) as f:
+            return [
+                line.strip() for line in f
+                if line.strip() and not line.startswith("#")
+            ]
+    except FileNotFoundError:
+        return []
+
+
+def classify(
+    asset: ObservedAsset,
+    rules: Rules,
+    consumer_vendors: list[str],
+    min_days_stable: int,
+) -> tuple[str, str]:
+    """
+    Returns (classification, reason).
+    Classification: unclassified / ignore / candidate / managed
+    """
+
+    # --- 1. Consumer device (universal ignore, regardless of VLAN) ---
+    vendor = (asset.vendor or "").lower()
+    for cv in consumer_vendors:
+        if cv.lower() in vendor:
+            return "ignore", f"Consumer device ({asset.vendor})"
+
+    # --- 2. Gateway IP (already managed as a Device SVI) ---
+    if asset.ip:
+        for suffix in rules.gateway_suffixes:
+            if asset.ip.endswith(suffix):
+                return "ignore", f"Gateway IP {asset.ip}"
+
+    # --- 3. VLAN intent ---
+    vlan_key = str(asset.vlan or "")
+    policy = rules.vlan_policy.get(vlan_key)
+    days = asset.days_stable or 0.0
+
+    if not policy:
+        # Unknown VLAN — become candidate after stability threshold
+        if days >= min_days_stable:
+            return "candidate", f"Unknown VLAN {asset.vlan}, stable {days:.1f} days — needs review"
+        return "unclassified", f"Unknown VLAN {asset.vlan}, only {days:.1f}/{min_days_stable} days"
+
+    intent = policy.intent
+
+    if intent == "ignore":
+        return "ignore", f"VLAN {vlan_key} policy: {policy.description or 'ignore'}"
+
+    if intent == "infrastructure":
+        if days >= min_days_stable:
+            return "managed", (
+                f"Infrastructure VLAN {vlan_key} ({policy.description}), "
+                f"stable {days:.1f} days"
+            )
+        return "unclassified", (
+            f"Infrastructure VLAN {vlan_key}, only {days:.1f}/{min_days_stable} days"
+        )
+
+    if intent in ("lab", "corporate"):
+        if days >= min_days_stable:
+            return "candidate", (
+                f"{intent.title()} VLAN {vlan_key} ({policy.description}), "
+                f"stable {days:.1f} days — manual promote required"
+            )
+        return "unclassified", (
+            f"{intent.title()} VLAN {vlan_key}, only {days:.1f}/{min_days_stable} days"
+        )
+
+    return "unclassified", f"No matching rule for VLAN {vlan_key}"
+
+
+def vlan_defaults(vlan: Optional[str], rules: Rules, fallback_site: str, fallback_role: str) -> tuple[str, str]:
+    """Return (site, role) for a given VLAN based on rules."""
+    policy = rules.vlan_policy.get(str(vlan or ""))
+    if policy:
+        return policy.default_site or fallback_site, policy.default_role or fallback_role
+    return fallback_site, fallback_role

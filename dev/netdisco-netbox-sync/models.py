@@ -67,6 +67,21 @@ class NetdiscoPortVlan(BaseModel):
     vlantype: Optional[str] = None
 
 
+class NetdiscoNode(BaseModel):
+    """A MAC-table entry — an end host seen on a switch port (nodes endpoint)."""
+    mac: str
+    switch: str
+    port: str
+    vlan: Optional[str] = None
+    ip: Optional[str] = None          # populated if ARP was correlated by Netdisco
+    dns: Optional[str] = None
+    vendor: Optional[str] = None
+    active: Optional[int] = None
+    time_first: Optional[str] = None
+    time_last: Optional[str] = None
+    time_recent: Optional[str] = None
+
+
 class NetdiscoVlan(BaseModel):
     ip: str
     vlan: int | str

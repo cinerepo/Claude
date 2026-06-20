@@ -1,6 +1,6 @@
 import httpx
 from typing import Optional
-from models import NetdiscoDevice, NetdiscoPort, NetdiscoDeviceIP, NetdiscoPortVlan, NetdiscoVlan
+from models import NetdiscoDevice, NetdiscoPort, NetdiscoDeviceIP, NetdiscoPortVlan, NetdiscoVlan, NetdiscoNode
 from config import Config
 
 
@@ -89,6 +89,49 @@ class NetdiscoClient:
             except Exception as e:
                 print(f"  WARN: could not parse port_vlan on {ip}: {e}")
         return result
+
+    def get_nodes(self, ip: str) -> list[NetdiscoNode]:
+        """MAC-table nodes seen on a device — the raw host discovery data."""
+        resp = self._http.get(
+            f"{self._base}/api/v1/object/device/{ip}/nodes",
+            headers=self._headers(),
+        )
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        result = []
+        for item in resp.json():
+            try:
+                result.append(NetdiscoNode(**item))
+            except Exception as e:
+                print(f"  WARN: could not parse node on {ip}: {e}")
+        return result
+
+    def get_ip_inventory(self, subnet: str) -> dict[str, str]:
+        """
+        Query the IP Inventory report for a subnet.
+        Returns {mac: ip} for all entries found.
+        The subnet parameter is required by Netdisco (e.g. '10.1.0.0/18').
+        """
+        resp = self._http.get(
+            f"{self._base}/api/v1/report/ip/ipinventory",
+            params={"subnet": subnet, "limit": "8192"},
+            headers=self._headers(),
+        )
+        if resp.status_code in (404, 400):
+            return {}
+        resp.raise_for_status()
+        try:
+            rows = resp.json()
+        except Exception:
+            return {}
+        mac_to_ip: dict[str, str] = {}
+        for row in rows:
+            mac = row.get("mac")
+            ip  = row.get("ip")
+            if mac and ip:
+                mac_to_ip[mac] = ip
+        return mac_to_ip
 
     def get_vlans(self, ip: str) -> list[NetdiscoVlan]:
         resp = self._http.get(

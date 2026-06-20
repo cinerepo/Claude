@@ -1,0 +1,48 @@
+# Consumer / personal device OUI vendors
+# One vendor string per line — matched as case-insensitive substring.
+# Devices matching any entry are permanently ignored regardless of VLAN.
+# Remove a line if you want to start tracking that vendor.
+# Add lines for any consumer vendors you discover in your environment.
+
+# Apple — removed: Mac Pro, Mac Studio, Mac Mini are managed infrastructure
+# Apple, Inc.
+# Apple Inc
+
+# Google
+Google
+
+# Samsung
+Samsung Electronics
+Samsung
+
+# Microsoft consumer (Xbox, Surface personal)
+# NOTE: leave this out if you have Windows servers — match is substring
+# Microsoft Corporation
+
+# Amazon (Echo, Fire TV, Kindle)
+Amazon Technologies
+Amazon
+
+# Roku
+Roku
+
+# Sony consumer
+Sony
+
+# Nintendo
+Nintendo
+
+# Xiaomi
+Xiaomi Communications
+
+# OPPO
+OPPO Digital
+
+# OnePlus
+OnePlus Technology
+
+# Huawei consumer
+HUAWEI TECHNOLOGIES
+
+# Nest / Google Home
+Nest Labs
