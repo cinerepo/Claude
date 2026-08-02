@@ -6,13 +6,14 @@ from netboxlabs.diode.sdk.ingester import (
     Entity,
     IPAddress,
     Interface,
+    MACAddress,
     Manufacturer,
     Platform,
     Prefix,
     Site,
     VLAN,
 )
-from models import NetdiscoDevice, NetdiscoPort, NetdiscoDeviceIP, NetdiscoPortVlan, NetdiscoVlan
+from models import NetdiscoDevice, NetdiscoPort, NetdiscoDeviceIP, NetdiscoPortVlan, NetdiscoVlan, NetdiscoNode
 from config import Config
 
 # Legacy Cisco internal VLANs — never meaningful in NetBox
@@ -25,11 +26,13 @@ def device_to_entities(
     device_ips: list[NetdiscoDeviceIP],
     port_vlans: list[NetdiscoPortVlan],
     vlans: list[NetdiscoVlan],
+    nodes: list[NetdiscoNode],
     config: Config,
 ) -> list[Entity]:
     entities: list[Entity] = []
     name = device.display_name
-    site_name = device.location or config.default_site
+    _loc = device.location if device.location and device.location.lower() != "unknown" else None
+    site_name = _loc or config.default_site
 
     # --- Device ---
     nb_device = Device(
@@ -75,6 +78,7 @@ def device_to_entities(
             tagged_by_port.setdefault(pv.port, []).append(pv.vlan)
 
     # --- Interfaces ---
+    access_ports: set[str] = set()
     for port in ports:
         vid = _to_vid(port.pvid) if _valid_vlan(port.pvid) else None
         tagged_vids = tagged_by_port.get(port.port, [])
@@ -87,6 +91,9 @@ def device_to_entities(
             mode = "access"
         else:
             mode = None
+
+        if mode == "access" and not port.is_uplink:
+            access_ports.add(port.port)
 
         iface = Interface(
             name=port.port,
@@ -101,6 +108,29 @@ def device_to_entities(
             tagged_vlans=tagged_vlans_objs if tagged_vlans_objs else None,
         )
         entities.append(Entity(interface=iface))
+
+    # --- Connected nodes (learned MACs) — access ports only, to avoid dumping
+    # every downstream MAC ever seen through a trunk/uplink onto one interface ---
+    for node in nodes:
+        if node.port not in access_ports:
+            continue
+        mac = _clean_mac(node.mac)
+        if not mac:
+            continue
+        iface_stub = Interface(name=node.port, device=device_stub)
+        details = ", ".join(
+            f"{label}={value}" for label, value in (
+                ("ip", node.ip),
+                ("vendor", node.vendor),
+                ("last_seen", node.time_last),
+            ) if value
+        )
+        entities.append(Entity(mac_address=MACAddress(
+            mac_address=mac,
+            assigned_object_interface=iface_stub,
+            description=node.dns or node.ip or "",
+            comments=f"learned via netdisco: {details}" if details else "learned via netdisco",
+        )))
 
     # --- IP Addresses (with interface assignment and real prefix length) ---
     seen_ips: set[str] = set()

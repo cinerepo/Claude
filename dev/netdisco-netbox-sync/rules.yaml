@@ -16,6 +16,12 @@ vlan_policy:
     intent: ignore
     description: "Default VLAN — noise"
 
+  "8":
+    intent: lab
+    default_role: Server
+    default_site: CineLAB
+    description: "HLSR Test VLAN"
+
   "20":
     intent: lab
     default_role: Server
@@ -80,4 +86,5 @@ gateway_suffixes:
 # ---------------------------------------------------------------------------
 ip_inventory_subnets:
   - "10.1.0.0/18"        # CineLAB — full lab infrastructure range
+  - "172.18.8.0/24"      # HLSR Studio - TEST LAB
   # - "10.1.64.0/18"     # Cinesys Corporate (uncomment when FortiGate ARP is accessible)

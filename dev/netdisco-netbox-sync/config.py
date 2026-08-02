@@ -28,6 +28,7 @@ class Config:
     stale_days: int
     notify_days: int
     decommission_days: int
+    prune_days: int
 
 
 def load_config() -> Config:
@@ -47,4 +48,5 @@ def load_config() -> Config:
         stale_days=int(os.getenv("STALE_DAYS", "30")),
         notify_days=int(os.getenv("NOTIFY_DAYS", "90")),
         decommission_days=int(os.getenv("DECOMMISSION_DAYS", "180")),
+        prune_days=int(os.getenv("PRUNE_DAYS", "2")),
     )

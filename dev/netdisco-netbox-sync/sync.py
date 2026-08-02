@@ -34,9 +34,10 @@ def main():
                 device_ips = nd.get_device_ips(device.ip)
                 port_vlans = nd.get_port_vlans(device.ip)
                 vlans      = nd.get_vlans(device.ip)
+                nodes      = nd.get_nodes(device.ip)
 
                 entities = device_to_entities(
-                    device, ports, device_ips, port_vlans, vlans, config
+                    device, ports, device_ips, port_vlans, vlans, nodes, config
                 )
 
                 by_type = {}

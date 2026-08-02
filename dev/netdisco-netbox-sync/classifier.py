@@ -96,6 +96,12 @@ def classify(
 
     if intent == "infrastructure":
         if days >= min_days_stable:
+            if not asset.ip:
+                return "ignore", (
+                    f"Infrastructure VLAN {vlan_key} ({policy.description}), "
+                    f"stable {days:.1f} days but never seen in ARP/IP inventory — "
+                    f"likely a non-addressed interface (bridge/uplink), not a host"
+                )
             return "managed", (
                 f"Infrastructure VLAN {vlan_key} ({policy.description}), "
                 f"stable {days:.1f} days"
