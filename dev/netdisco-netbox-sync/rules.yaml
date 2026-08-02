@@ -16,52 +16,17 @@ vlan_policy:
     intent: ignore
     description: "Default VLAN — noise"
 
-  "8":
+  "10":
     intent: lab
     default_role: Server
-    default_site: CineLAB
-    description: "HLSR Test VLAN"
+    default_site: <Enter Default Site>
+    description: "Enter Description"
 
   "20":
     intent: lab
     default_role: Server
-    default_site: CineLAB
-    description: "Lab House VLAN"
-
-  "21":
-    intent: lab
-    default_role: Server
-    default_site: CineLAB
-    description: "VXLAN test"
-
-  "30":
-    intent: infrastructure
-    default_role: Server
-    default_site: CineLAB
-    description: "RDMA / NVMe-oF storage network"
-
-  "40":
-    intent: infrastructure
-    default_role: Server
-    default_site: CineLAB
-    description: "Services VLAN — Proxmox, AD, DNS, Syslog"
-
-  "78":
-    intent: infrastructure
-    default_role: Network Device
-    default_site: CineLAB
-    description: "Management / out-of-band"
-
-  "88":
-    intent: corporate
-    default_site: CineLAB
-    description: "Cinesys Corporate Network"
-
-  "172":
-    intent: infrastructure
-    default_role: Server
-    default_site: CineLAB
-    description: "RDMA NVMe-oF VLAN"
+    default_site: <Enter Default Site>
+    description: "Enter Description"
 
 
 # IPs ending in these suffixes are gateway addresses — already managed as
@@ -85,6 +50,5 @@ gateway_suffixes:
 # Leave empty to skip IP enrichment (nodes will be MAC-only).
 # ---------------------------------------------------------------------------
 ip_inventory_subnets:
-  - "10.1.0.0/18"        # CineLAB — full lab infrastructure range
-  - "172.18.8.0/24"      # HLSR Studio - TEST LAB
-  # - "10.1.64.0/18"     # Cinesys Corporate (uncomment when FortiGate ARP is accessible)
+  - "10.1.0.0/18"        # First Subnet 
+  - "172.16.0.0/16"      # Aditional Subnet
