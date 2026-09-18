@@ -199,5 +199,62 @@
     "consecutive_up": 3,
     "status": "up",
     "notes": ""
+  },
+  {
+    "mac": "d4:76:a0:5d:cc:88",
+    "ip": "10.1.88.1",
+    "hostname": "unknown",
+    "mdns_name": "",
+    "netbios_name": "",
+    "vendor": "Fortinet, Inc.",
+    "open_ports": [
+      "22",
+      "53",
+      "80",
+      "179",
+      "443"
+    ],
+    "services": {
+      "22": "ssh",
+      "53": "domain",
+      "80": "http",
+      "179": "tcpwrapped",
+      "443": "ssl|https"
+    },
+    "first_seen": "2026-09-17_15-13-49",
+    "last_seen": "2026-09-17_15-13-49",
+    "consecutive_up": 1,
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "44:a8:42:20:f6:a4",
+    "ip": "10.1.88.6",
+    "hostname": "unknown",
+    "mdns_name": "",
+    "netbios_name": "",
+    "vendor": "Dell Inc.",
+    "open_ports": [],
+    "services": {},
+    "first_seen": "2026-09-17_15-13-49",
+    "last_seen": "2026-09-17_15-13-49",
+    "consecutive_up": 1,
+    "status": "up",
+    "notes": ""
+  },
+  {
+    "mac": "c8:1f:66:c4:05:c7",
+    "ip": "10.1.88.7",
+    "hostname": "unknown",
+    "mdns_name": "",
+    "netbios_name": "",
+    "vendor": "Dell Inc.",
+    "open_ports": [],
+    "services": {},
+    "first_seen": "2026-09-17_15-13-49",
+    "last_seen": "2026-09-17_15-13-49",
+    "consecutive_up": 1,
+    "status": "up",
+    "notes": ""
   }
 ]

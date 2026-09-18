@@ -1,0 +1,80 @@
+======================================================
+ Cinesys Client Diagnostics — 2026-09-17_15-12-30
+======================================================
+ Interface : en0    IP : 10.1.88.127    Subnet : 10.1.88.0/24
+ Gateway   : 10.1.88.1
+======================================================
+
+Interface  ·  en0
+──────────────────────────────────────────────────────────
+  ·  MAC      6e:4d:ab:87:be:a7
+  ·  IP       10.1.88.127 / 10.1.88.0/24
+  ·  MTU      1500 bytes
+  ·  MSS      1460 bytes  (MTU − 40)
+  ·  Gateway  10.1.88.1
+  ·  Media    autoselect
+
+Interface Stats
+──────────────────────────────────────────────────────────
+  ·  RX packets   1572358
+  ·  TX packets   340875
+  ✓  RX errors    0
+  ✓  TX errors    0
+  ✓  Collisions   0
+
+Firewall
+──────────────────────────────────────────────────────────
+  ⚠  Application Firewall   disabled
+  ·  Stealth mode           disabled
+  ·  Block all incoming     disabled
+
+Routing
+──────────────────────────────────────────────────────────
+  ·  Default gateway    10.1.88.1  via  en7
+  ·  Active routes      48
+  ⚠  Multiple default routes detected (8)
+
+Internet Connectivity
+──────────────────────────────────────────────────────────
+  ✓  1.1.1.1   23.071ms avg   loss 0.0%
+  ✓  8.8.8.8   10.958ms avg   loss 0.0%
+
+DNS
+──────────────────────────────────────────────────────────
+  ✓  1.1.1.1   10ms
+  ✓  8.8.8.8   28ms
+  ✓  local  (10.1.88.1)   10ms
+
+Gateway  ·  10.1.88.1
+──────────────────────────────────────────────────────────
+  ·  Min / Avg / Max   stddev = 0.809 / 1.602 / 4.315 ms
+  ·  Jitter            0.709ms  (stddev)
+  ✓  No packet loss to gateway
+
+Path MTU
+──────────────────────────────────────────────────────────
+  ·  Path MTU   probe inconclusive — ICMP DF-bit filtering suspected
+  ·  Local MTU  1500 bytes  ·  MSS  1460 bytes
+
+Traceroute  ·  1.1.1.1  (8 hops max)
+──────────────────────────────────────────────────────────
+  ·   2  104-63-139-254.lightspeed.hstntx.sbcglobal.net (104.63.139.254)  1.874 ms  1.769 ms  1.971 ms
+  ·   3  * * *
+  ·   4  71.149.49.92 (71.149.49.92)  3.181 ms  3.330 ms  2.920 ms
+  ·   5  32.130.107.114 (32.130.107.114)  8.285 ms *  9.106 ms
+  ·   6  * * *
+  ·   7  * * *
+  ·   8  32.130.16.255 (32.130.16.255)  9.193 ms  7.631 ms  7.439 ms
+
+Speed
+──────────────────────────────────────────────────────────
+  ·  Uplink capacity: 872.872 Mbps
+  ·  Downlink capacity: 846.305 Mbps
+  ·  Uplink Responsiveness: High (19.846 milliseconds | 3023 RPM)
+  ·  Downlink Responsiveness: High (22.353 milliseconds | 2684 RPM)
+  ·  Idle Latency: 14.827 milliseconds | 4046 RPM
+
+======================================================
+ SUMMARY: 0 errors  ·  2 warnings
+ Report: /Users/kobykub/Documents/claude/Claude/diagnostics/network/health/reports/report_client_2026-09-17_15-12-30.txt
+======================================================
