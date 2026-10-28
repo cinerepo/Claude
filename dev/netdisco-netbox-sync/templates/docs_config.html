@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Config docs — netdisco-netbox-sync{% endblock %}
+{% block content %}
+<a class="back-link" href="/config">← Back to Config</a>
+<h1>How Config works</h1>
+<p class="lede">This page edits <code>rules.yaml</code> — the single file that both Discover
+   (end hosts) and infrastructure sync (switches/firewalls) read to decide VLAN behavior,
+   NetBox tenant/location, and site/role defaults.</p>
+
+<div class="docs">
+  <div class="card">
+    <h3>VLAN policy fields</h3>
+    <dl>
+      <dt>Intent</dt>
+      <dd>
+        <b>infrastructure</b> — end hosts here auto-promote to NetBox once stable (see Discover docs).<br>
+        <b>lab</b> / <b>corporate</b> — end hosts become a review candidate instead; nothing auto-pushes.<br>
+        <b>ignore</b> — never tracked at all (e.g. the default VLAN).
+      </dd>
+      <dt>Role / Site</dt>
+      <dd>Required. What gets set on any end host promoted from this VLAN if you don't override it manually at promote time.</dd>
+      <dt>Tenant / Location</dt>
+      <dd>Optional. Applied to end hosts promoted from this VLAN. Leave both blank to omit the field
+        entirely in NetBox rather than setting some placeholder value.</dd>
+      <dt>Description</dt>
+      <dd>Free text, shown nowhere but here — just for your own reference.</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h3>Device overrides — why they're separate from VLAN policy</h3>
+    <p style="color:var(--muted);font-size:0.87rem">
+      Site/Tenant/Location for <b>end hosts</b> is VLAN-derived because a host genuinely lives on one
+      VLAN. That doesn't hold for <b>infrastructure devices</b> — a single switch or firewall typically
+      trunks dozens of VLANs, so "which VLAN is this switch's site" has no sensible answer. Device
+      overrides let you set site/tenant/location/role explicitly, keyed by the device's exact name as
+      Netdisco/NetBox report it (case-sensitive, must match exactly). All four are optional — leave any
+      of them blank to fall back to the flat default (site/tenant/location, from <code>.env</code>) or
+      the automatic vendor/model detection (role).
+    </p>
+    <div class="callout">
+      <b>The real bug this exists to fix:</b> NetBox's own device uniqueness is
+      <code>(name, site, tenant)</code> together. If a device's site or tenant is changed manually in
+      the NetBox UI but the sync tool keeps pushing the old value every run, the reconciler can't find a
+      match on that natural key anymore and creates a <b>duplicate</b> device instead of updating the
+      existing one. Setting the override here — so the tool sends the same value every run — is what
+      prevents that. This applies to site exactly the same way it does to tenant; changing an
+      infrastructure device's Site by hand in NetBox directly is <b>not</b> safe without also setting
+      it here.
+    </div>
+    <p style="color:var(--muted);font-size:0.87rem;margin-top:0.8rem">
+      <b>Role</b> works a little differently — there's no "flat default" for it. Without an override,
+      the role is auto-detected from vendor/model (Fortinet → Firewall, Cisco Catalyst → Switch, Cisco
+      ASR/ISR/CSR/Nexus → Router, everything else → Network Device). That heuristic can't tell a core
+      switch from an access switch, or know about any custom role taxonomy in your NetBox — set the
+      override here any time the auto-detected role isn't the one you actually want.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Validation and safety</h3>
+    <p style="color:var(--muted);font-size:0.87rem">Every save follows the same sequence, whether it's
+      a VLAN policy edit or a device override:</p>
+    <ol>
+      <li>Build the updated config in memory.</li>
+      <li>Write it to a temporary file.</li>
+      <li>Parse that temp file with the exact same parser <code>sync.py</code>/<code>discover.py</code> use.</li>
+      <li>If parsing fails, the edit is rejected and shown as an error — <code>rules.yaml</code> is never touched.</li>
+      <li>If it succeeds, the current <code>rules.yaml</code> is copied to a timestamped <code>.bak</code> file, then the new version replaces it atomically.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>IP inventory subnets</h3>
+    <p style="color:var(--muted);font-size:0.87rem">
+      Netdisco's IP Inventory report requires an explicit subnet parameter — it won't enumerate
+      "everything." Every CIDR listed here gets queried on each Discovery run to cross-reference MACs
+      already in the staging DB with resolved IPs/hostnames. Anything outside these ranges still gets
+      discovered via MAC/ARP tables, it just stays MAC-only (no IP enrichment). Prefer <code>/18</code>
+      or <code>/24</code> ranges — very large ranges (e.g. <code>/8</code>) can make Netdisco time out or
+      return excessive historical records.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>Run Sync Now</h3>
+    <p style="color:var(--muted);font-size:0.87rem">Runs <code>sync.py</code> for real — the
+      infrastructure pipeline, separate from Discover. For every device Netdisco knows about, it pushes
+      interfaces, IPs, prefixes, VLANs, and learned-MAC data to NetBox via Diode, applying this page's
+      device override (or falling back to the flat default tenant/location in <code>.env</code>) and
+      setting the same <code>discovery_source</code>/<code>last_discovered</code> custom fields the
+      <a href="/lifecycle">Lifecycle</a> page tracks. Runs every device, every time — this is what keeps
+      an already-synced device's data current, not just new ones.</p>
+  </div>
+</div>
+{% endblock %}

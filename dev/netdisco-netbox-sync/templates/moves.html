@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Port moves — netdisco-netbox-sync{% endblock %}
+{% block content %}
+<a class="back-link" href="/">← Back to Discover</a>
+<div class="page-head">
+  <h1>Port moves</h1>
+</div>
+<p class="lede">Full audit log of every detected switch/port change, newest first — this is purely
+   local bookkeeping (see <a href="/docs/discover">How this works</a> for why). Acknowledging an
+   entry just marks it reviewed; nothing is ever deleted from this log.</p>
+
+{% set pending = history | selectattr("acknowledged", "equalto", 0) | list %}
+{% if pending %}
+<form method="post" action="/discover/moves/acknowledge-all" style="margin-bottom:1.5rem">
+  <button type="submit" class="secondary">Acknowledge all ({{ pending | length }})</button>
+</form>
+{% endif %}
+
+<table>
+  <thead>
+    <tr><th>Device</th><th>From</th><th>To</th><th>When</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for h in history %}
+    <tr>
+      <td>{{ h.netbox_name or h.mac }}</td>
+      <td class="muted">{{ h.old_switch or "—" }} / {{ h.old_port or "—" }}</td>
+      <td>{{ h.new_switch or "—" }} / {{ h.new_port or "—" }}</td>
+      <td class="muted">{{ h.changed_at }}</td>
+      <td>
+        {% if h.acknowledged %}
+        <span class="badge managed">acknowledged</span>
+        {% else %}
+        <span class="badge candidate">needs review</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if not h.acknowledged %}
+        <form method="post" action="/discover/moves/{{ h.id }}/acknowledge">
+          <button type="submit" class="secondary">Acknowledge</button>
+        </form>
+        {% else %}
+        <span class="muted">{{ h.acknowledged_at }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">No port changes recorded yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

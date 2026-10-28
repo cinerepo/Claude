@@ -1,0 +1,35 @@
+{# Single template covering all 3 states of a "Run Now" panel: not started / in
+   progress (polling) / done. Reused by the page itself (run_id=None), the POST
+   that starts a run, and the /runs/{run_id}/log poll endpoint - one template,
+   one source of truth for the markup, so the polling swap always lands on
+   something structurally identical to what it's replacing. #}
+<div id="run-panel-{{ panel_id }}">
+  {% if run_id is none %}
+    <button class="secondary"
+            hx-post="{{ run_endpoint }}"
+            hx-target="#run-panel-{{ panel_id }}"
+            hx-swap="outerHTML">
+      {{ run_button_label }}
+    </button>
+  {% else %}
+    <div class="run-log"
+         {% if not done %}
+         hx-get="/runs/{{ run_id }}/log?run_endpoint={{ run_endpoint }}&panel_id={{ panel_id }}&label={{ run_button_label | urlencode }}"
+         hx-trigger="every 1s"
+         hx-target="#run-panel-{{ panel_id }}"
+         hx-swap="outerHTML"
+         {% endif %}
+    >{% for line in lines %}{{ line }}
+{% endfor %}{% if not done %}
+[running...]{% else %}
+[exit code {{ returncode }}]{% endif %}</div>
+    {% if done %}
+      <button class="secondary" style="margin-top:0.5rem"
+              hx-post="{{ run_endpoint }}"
+              hx-target="#run-panel-{{ panel_id }}"
+              hx-swap="outerHTML">
+        Run Again
+      </button>
+    {% endif %}
+  {% endif %}
+</div>

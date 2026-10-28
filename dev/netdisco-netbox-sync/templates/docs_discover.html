@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Discover docs — netdisco-netbox-sync{% endblock %}
+{% block content %}
+<a class="back-link" href="/">← Back to Discover</a>
+<h1>How Discover works</h1>
+<p class="lede">This is Pipeline 2 — host discovery. It pulls end-host MAC/ARP data from Netdisco,
+   stages it locally, classifies each asset, and lets you selectively promote the ones worth
+   tracking to NetBox. It's separate from the infrastructure sync on the Config page, which
+   pushes switches/firewalls directly with no staging step.</p>
+
+<div class="docs">
+  <div class="card">
+    <h3>Classification states</h3>
+    <dl>
+      <dt>unclassified</dt>
+      <dd>Seen, but not yet stable long enough to act on — needs {{ config.min_days_stable }} day(s)
+        of continuous presence (<code>MIN_DAYS_STABLE</code>) before it graduates.</dd>
+
+      <dt>candidate</dt>
+      <dd>Stable enough for review on a <b>lab</b> or <b>corporate</b> VLAN (see the Config page's
+        VLAN intent). These need a manual decision — Promote or Ignore — they're never auto-pushed.</dd>
+
+      <dt>managed</dt>
+      <dd>Actually pushed to NetBox. Automatic for <b>infrastructure</b>-intent VLANs once stable;
+        manual (via Promote) for everything else. Once managed, the asset is <b>human-locked</b> —
+        re-running Discovery only refreshes its <code>last_discovered</code> timestamp, it never gets
+        reclassified or renamed out from under you.</dd>
+
+      <dt>ignore</dt>
+      <dd>Permanently excluded. Two flavors: <b>auto-ignore</b> (consumer OUI vendor, or an
+        <code>ignore</code>-intent VLAN like the default VLAN 1) which can be re-evaluated later if
+        the vendor blocklist changes, and <b>human-ignore</b> (you clicked Ignore) which is permanent.</dd>
+
+      <dt>promotion_failed</dt>
+      <dd>An infrastructure-VLAN asset tried to auto-promote and the push to NetBox errored. Retried
+        automatically on the next Discovery run.</dd>
+
+      <dt>stale</dt>
+      <dd>Was managed, hasn't been re-observed in a while. (Deeper staleness tracking — with actual
+        state transitions and NetBox status changes — lives on the <a href="/lifecycle">Lifecycle</a>
+        page; this classification is the staging DB's own lighter-weight signal.)</dd>
+
+      <dt>archived</dt>
+      <dd>Was <code>unclassified</code>/<code>candidate</code> and went quiet for {{ config.prune_days }}
+        day(s) (<code>PRUNE_DAYS</code>) without being re-observed. Nothing is deleted — the full record
+        (first seen, VLAN, last switch/port) stays in the staging DB, just hidden from the default view.
+        Hidden from the default view and the summary chips up top — use the <b>Classification</b> filter
+        to see what's dropped off. If Netdisco sees the same MAC again, the next Discovery run
+        automatically reclassifies it back to <code>unclassified</code>/<code>candidate</code> with its
+        original <code>first_seen</code> intact — nothing further to do.</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h3>How an asset gets classified</h3>
+    <p style="color:var(--muted);font-size:0.87rem;margin:0 0 0.8rem">Two inputs decide everything:
+       which VLAN the asset is on (looked up against the Config page's VLAN policy) and how many days
+       it's been continuously stable.</p>
+    <ol>
+      <li><b>Consumer device?</b> Vendor OUI matched against the consumer blocklist → always <code>ignore</code>, regardless of VLAN.</li>
+      <li><b>Gateway IP?</b> Address ends in a configured gateway suffix (e.g. <code>.1</code>) → <code>ignore</code>, it's already a Device SVI elsewhere.</li>
+      <li><b>VLAN intent = <code>ignore</code></b> → always <code>ignore</code>.</li>
+      <li><b>VLAN intent = <code>infrastructure</code></b> → <code>unclassified</code> until stable, then auto-promotes to <code>managed</code> (needs a resolved IP; MAC-only stays <code>ignore</code>d as a likely uplink/bridge).</li>
+      <li><b>VLAN intent = <code>lab</code> or <code>corporate</code></b> → <code>unclassified</code> until stable, then becomes <code>candidate</code> for manual review.</li>
+      <li><b>Unknown VLAN</b> (not in Config at all) → same as lab/corporate: becomes a <code>candidate</code> once stable, not silently dropped.</li>
+    </ol>
+    <div class="callout">Stability itself is just "still being seen." An asset re-observed by every
+      Discovery run keeps its clock running; one that stops being seen sits still until it's pruned
+      (see below) or, if it was already <code>managed</code>, until <a href="/lifecycle">Lifecycle</a>
+      notices via its own thresholds.</div>
+  </div>
+
+  <div class="card">
+    <h3>What Promote actually does</h3>
+    <p style="color:var(--muted);font-size:0.87rem">Click the <b>⋯</b> menu on a candidate row. Every
+      field is optional — leave it blank and it falls back to what's already staged:</p>
+    <ul>
+      <li><b>Name</b> → staged hostname (reverse-DNS from Netdisco, when available) → IP → MAC, in that order.</li>
+      <li><b>Role / Site</b> → the VLAN's <code>default_role</code>/<code>default_site</code> from Config.</li>
+    </ul>
+    <p style="color:var(--muted);font-size:0.87rem;margin-top:0.8rem">Behind the scenes it pushes a
+      real <code>Device</code> to NetBox via Diode with: the resolved name/role/site, <b>tenant</b> and
+      <b>location</b> from that VLAN's Config entry (if set), and two custom fields —
+      <code>discovery_source=netdisco</code> and <code>last_discovered=now</code> — which is what feeds
+      the <a href="/lifecycle">Lifecycle</a> page's staleness tracking. If Netdisco has a reverse-DNS
+      name staged for the asset, it's also set as the IP address's <code>dns_name</code> in NetBox
+      (same as the infrastructure sync on the Config page already does) — refreshed on every heartbeat,
+      not just at promote time. The asset flips to <code>managed</code> and is locked from further
+      reclassification.</p>
+  </div>
+
+  <div class="card">
+    <h3>Ignore / Unpromote</h3>
+    <dl>
+      <dt>Ignore</dt>
+      <dd>Marks a candidate as permanently excluded. Stays in the staging DB for audit purposes, just
+        never acted on again.</dd>
+      <dt>Unpromote</dt>
+      <dd>Resets a <code>managed</code> asset back to <code>candidate</code> in the staging DB only —
+        it does <b>not</b> delete the device from NetBox. Use this when a device was removed from
+        NetBox out-of-band and you want it to show up for review again instead of silently
+        re-promoting on the next run.</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h3>Filters</h3>
+    <ul>
+      <li><b>Classification</b> — show only the checked states.</li>
+      <li><b>Exclude</b> — hide the checked states (handy for "everything except ignore").</li>
+      <li><b>VLAN</b> — multi-select, show assets on any of the checked VLANs.</li>
+      <li><b>Vendor</b> / <b>search</b> — vendor is exact-match from the OUI lookup; search matches MAC, IP, or hostname.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Switch/Port tracking</h3>
+    <p style="color:var(--muted);font-size:0.87rem">Every managed host's switch/port is tracked
+      locally (staging DB only) and compared against the live Netdisco observation on every
+      Discovery run. Unchanged → nothing happens, cheap no-op. Different → it's logged as a move,
+      with the old and new location and when it happened.</p>
+    <p style="color:var(--muted);font-size:0.87rem">This page only ever shows a small
+      "N port changes need review" badge when there's something unacknowledged — the full,
+      permanent audit log lives on its own <a href="/discover/moves">Port moves</a> page so it
+      doesn't flood Discover once there are a lot of entries. <b>Acknowledge</b> just marks an
+      entry reviewed (e.g. "yep, I moved that on purpose, documentation's updated") — it never
+      deletes the row, so the log stays complete either way.</p>
+    <div class="callout">
+      <b>This is not pushed to NetBox as a real Cable object.</b> Diode (the ingestion pipeline
+      this tool uses) doesn't support creating Cable connections yet — confirmed directly against
+      the real NetBox/Diode instance rather than assumed. Building that ourselves would mean
+      hand-rolling the "find the existing cable, update it, don't create duplicates" logic Diode
+      normally handles automatically for every other object type, which wasn't judged worth it
+      just for this. What you get instead: an accurate, always-current record of where each
+      device was last seen plugged in, and a clear audit trail of when that changed — without a
+      stale or duplicated Cable object cluttering NetBox itself.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Run Discovery Now</h3>
+    <p style="color:var(--muted);font-size:0.87rem">Runs <code>discover.py run</code> for real, same as the CLI:</p>
+    <ol>
+      <li>Pulls MAC-table nodes from every infrastructure device Netdisco knows about, plus IP-inventory data for reverse-DNS/IP enrichment.</li>
+      <li>Updates the staging DB and reclassifies everything against the current <code>rules.yaml</code>.</li>
+      <li>Auto-promotes any newly-stable <b>infrastructure</b>-VLAN assets.</li>
+      <li><b>Heartbeat</b>: re-pushes <code>last_discovered</code> to NetBox for every already-managed asset, so Lifecycle staleness tracking stays accurate.</li>
+      <li>Archives <code>unclassified</code>/<code>candidate</code> rows not re-observed in {{ config.prune_days }} day(s) (<code>PRUNE_DAYS</code>) — transient noise cleanup, nothing is deleted (see <code>archived</code> above). <code>managed</code> and <code>ignore</code> are never touched by this.</li>
+    </ol>
+  </div>
+</div>
+{% endblock %}

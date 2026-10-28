@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Lifecycle — netdisco-netbox-sync{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Lifecycle</h1>
+  <a class="help-link" href="/docs/lifecycle">? How this works</a>
+</div>
+<p class="lede">Computed live from NetBox's current <code>last_discovered</code> on every page load — this
+   is what <code>lifecycle.py</code> would report right now. Stored <code>discovery_state</code> only
+   changes when the reconciler actually runs (Run Now below, or its cron schedule).</p>
+
+{% if error %}
+<div class="error-box">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+  {% include "_run_panel.html" %}
+</div>
+
+{% if not error %}
+<table>
+  <thead>
+    <tr>
+      <th>Device</th><th>Status</th><th>Stored state</th><th>Computed now</th>
+      <th>Age (days)</th><th>First discovered</th><th>Last discovered</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.name }}</td>
+      <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+      <td><span class="badge {{ r.stored_state }}">{{ r.stored_state }}</span></td>
+      <td>
+        <span class="badge {{ r.computed_state }}">{{ r.computed_state }}</span>
+        {% if r.pending %}<span class="muted">pending update</span>{% endif %}
+      </td>
+      <td>{{ r.age_days }}</td>
+      <td class="muted">{{ r.first_discovered or "—" }}</td>
+      <td class="muted">{{ r.last_discovered or "—" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">No managed devices found (discovery_source=netdisco).</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

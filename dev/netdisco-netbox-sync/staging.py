@@ -26,6 +26,25 @@ class ObservedAsset:
     netbox_device_id: Optional[int] = None
     netbox_site: Optional[str] = None
     netbox_role: Optional[str] = None
+    # Stored (not recomputed) at promotion time, same as netbox_site/netbox_role above -
+    # a later heartbeat re-ingest (see discover.py's is_human_locked handling) reuses these
+    # exact stored values rather than recomputing from rules.yaml fresh. Deliberate: NetBox's
+    # own Device uniqueness is (name, site, tenant) together - if rules.yaml's tenant mapping
+    # for this VLAN ever changes after promotion, recomputing fresh at heartbeat time would
+    # silently change this device's natural key and create a duplicate, the same bug class
+    # already fixed once for infrastructure devices (see transformer.py's own comment).
+    netbox_tenant: Optional[str] = None
+    netbox_location: Optional[str] = None
+    # The switch/port last recorded here as this device's known location - purely local
+    # bookkeeping, NOT pushed to NetBox as a Cable object (Diode doesn't support Cable
+    # ingestion yet, confirmed live - see discover.py's own comment for the full story).
+    # Named tracked_* rather than netbox_* specifically because it isn't a NetBox object -
+    # that would be a misleading name for what's actually just our own audit trail.
+    # Distinct from switch/port above, which already refresh to the latest Netdisco
+    # observation on every run regardless of classification. Comparing the two against
+    # each other is how a port move gets detected and logged to port_history.
+    tracked_switch: Optional[str] = None
+    tracked_port: Optional[str] = None
     netbox_name: Optional[str] = None
     promoted_at: Optional[str] = None
     last_evaluated: Optional[str] = None
@@ -61,10 +80,27 @@ CREATE TABLE IF NOT EXISTS observed_assets (
     netbox_device_id    INTEGER,
     netbox_site         TEXT,
     netbox_role         TEXT,
+    netbox_tenant       TEXT,
+    netbox_location     TEXT,
+    tracked_switch      TEXT,
+    tracked_port        TEXT,
     netbox_name         TEXT,
     promoted_at         TEXT,
     last_evaluated      TEXT,
     ignore_reason       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS port_history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac             TEXT NOT NULL,
+    netbox_name     TEXT,
+    old_switch      TEXT,
+    old_port        TEXT,
+    new_switch      TEXT,
+    new_port        TEXT,
+    changed_at      TEXT NOT NULL,
+    acknowledged    INTEGER NOT NULL DEFAULT 0,
+    acknowledged_at TEXT
 );
 """
 
@@ -77,6 +113,61 @@ class StagingDB:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+        # CREATE TABLE IF NOT EXISTS is a no-op against an already-existing DB file from
+        # before these columns existed - SQLite has no native ADD COLUMN IF NOT EXISTS,
+        # so this is the standard idempotent idiom (attempt the add, ignore "already exists").
+        for col in ("netbox_tenant", "netbox_location"):
+            try:
+                self._conn.execute(f"ALTER TABLE observed_assets ADD COLUMN {col} TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
+        # Renamed from netbox_cabled_switch/port (misleading - never was a NetBox object,
+        # see ObservedAsset's own comment). RENAME COLUMN handles a DB that has the OLD
+        # name, moving real data over intact.
+        #
+        # Real bug found live in production: RENAME COLUMN's "no such column" error looks
+        # IDENTICAL for two different situations - "already renamed, nothing to do" and
+        # "never had either name at all because this DB predates the whole feature" - so
+        # this loop alone can't tell them apart and was silently doing nothing for the
+        # second case. Production's real observed_assets.db went straight from the
+        # pre-feature schema to today's code, skipping the intermediate netbox_cabled_*
+        # stage that only ever existed in lab testing - so RENAME COLUMN always failed
+        # "no such column" (correctly ignored, but for the wrong reason) and the column
+        # was never actually added, until the first promote's set_cabled_port() call hit
+        # a genuine "no such column: tracked_switch" - the asset had already been pushed
+        # to NetBox and marked managed locally by that point, so promote "worked" from the
+        # user's perspective while the request itself 500'd.
+        #
+        # Fix: always follow the rename attempt with a plain ADD COLUMN IF NOT EXISTS
+        # (same idiom as netbox_tenant/netbox_location above) - covers every case: renamed
+        # already (ADD COLUMN then no-ops on "duplicate column name"), fresh DB created
+        # with the new name by _SCHEMA above (same no-op), or - the case that was missing -
+        # a DB that never had either name, where this is the only thing that actually adds
+        # the column.
+        for old, new in (("netbox_cabled_switch", "tracked_switch"), ("netbox_cabled_port", "tracked_port")):
+            try:
+                self._conn.execute(f"ALTER TABLE observed_assets RENAME COLUMN {old} TO {new}")
+            except sqlite3.OperationalError as e:
+                if "no such column" not in str(e) and "duplicate column name" not in str(e):
+                    raise
+        for col in ("tracked_switch", "tracked_port"):
+            try:
+                self._conn.execute(f"ALTER TABLE observed_assets ADD COLUMN {col} TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise
+        try:
+            self._conn.execute("ALTER TABLE port_history ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e):
+                raise
+        try:
+            self._conn.execute("ALTER TABLE port_history ADD COLUMN acknowledged_at TEXT")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e):
+                raise
         self._conn.commit()
 
     def upsert(self, asset: ObservedAsset):
@@ -166,6 +257,26 @@ class StagingDB:
             )
         self._conn.commit()
 
+    def update_netbox_fields(self, mac: str, **kwargs) -> None:
+        """Update netbox_* columns only - unlike set_classification(), does not touch
+        classification/classification_reason/last_evaluated. Used both for the heartbeat's
+        opportunistic netbox_device_id backfill (a device-ID lookup succeeding isn't a
+        reclassification event) and for the webui's direct-edit path (updating the stored
+        fields to match a NetBox PATCH that already succeeded, so the next heartbeat's
+        Diode re-push stays consistent with what's actually in NetBox instead of reverting
+        to the pre-edit values)."""
+        for col, val in kwargs.items():
+            self._conn.execute(
+                f"UPDATE observed_assets SET {col}=? WHERE mac=?", (val, mac)
+            )
+        self._conn.commit()
+
+    def list_all(self) -> list[ObservedAsset]:
+        rows = self._conn.execute(
+            "SELECT * FROM observed_assets ORDER BY classification, vlan, last_seen DESC"
+        ).fetchall()
+        return [_row_to_asset(r) for r in rows]
+
     def list_by_classification(self, classification: str) -> list[ObservedAsset]:
         rows = self._conn.execute(
             "SELECT * FROM observed_assets WHERE classification=? ORDER BY last_seen DESC",
@@ -181,22 +292,27 @@ class StagingDB:
         return {r["classification"]: r["cnt"] for r in rows}
 
     def prune_expired(self, prune_days: int) -> list[ObservedAsset]:
-        """Delete unclassified/candidate assets not re-observed in prune_days.
+        """Archive unclassified/candidate assets not re-observed in prune_days.
 
         Only touches the two 'still in limbo' states. 'managed' (promoted to
         NetBox), 'ignore' (human or auto), and 'promotion_failed' (a real
         infra device that just had a transient push error) are never
-        auto-deleted here — those need an explicit human decision
+        auto-archived here — those need an explicit human decision
         (unpromote/ignore) or get retried by the classifier, not silent
         removal. This is specifically for transient noise (e.g. a MAC seen
         only because of a temporary bridged/test cable) that would otherwise
         accumulate in the staging DB forever.
 
+        Rows are archived (classification='archived'), never deleted — the
+        record (first_seen, vlan, switch/port history) stays queryable and
+        re-observation naturally reclassifies it back to unclassified/
+        candidate on a future upsert() rather than starting from scratch.
+
         Call this after a run's upsert loop — anything re-observed in that
         same run already got last_seen bumped to now and won't be eligible.
-        Returns the deleted rows (full record — mac/ip/vlan/switch/port/
+        Returns the archived rows (full record — mac/ip/vlan/switch/port/
         vendor/hostname) so the caller can report or notify on exactly what
-        was removed before it's gone for good.
+        was archived.
         """
         now = datetime.now()
         rows = self._conn.execute("""
@@ -210,12 +326,66 @@ class StagingDB:
             if last and (now - last).total_seconds() / 86400 >= prune_days:
                 expired.append(asset)
         if expired:
+            reason = f"Archived - not re-observed in {prune_days}+ days"
+            now_str = _now()
             self._conn.executemany(
-                "DELETE FROM observed_assets WHERE mac=?",
-                [(a.mac,) for a in expired],
+                """UPDATE observed_assets
+                   SET classification='archived', classification_reason=?, last_evaluated=?
+                   WHERE mac=?""",
+                [(reason, now_str, a.mac) for a in expired],
             )
             self._conn.commit()
         return expired
+
+    def set_cabled_port(self, mac: str, switch: Optional[str], port: Optional[str]) -> None:
+        """Set tracked_switch/port with no history row - used the first time a device's
+        switch/port is recorded (nothing to compare against yet, so it's not a 'move')."""
+        self._conn.execute("""
+            UPDATE observed_assets SET tracked_switch=?, tracked_port=? WHERE mac=?
+        """, (switch, port, mac))
+        self._conn.commit()
+
+    def record_port_change(self, mac: str, netbox_name: Optional[str],
+                            old_switch: Optional[str], old_port: Optional[str],
+                            new_switch: Optional[str], new_port: Optional[str]) -> None:
+        """Insert an audit row and update the stored tracked_switch/port to the new value
+        in one call - the two always change together, never independently."""
+        self._conn.execute("""
+            INSERT INTO port_history (mac, netbox_name, old_switch, old_port, new_switch, new_port, changed_at)
+            VALUES (?,?,?,?,?,?,?)
+        """, (mac, netbox_name, old_switch, old_port, new_switch, new_port, _now()))
+        self._conn.execute("""
+            UPDATE observed_assets SET tracked_switch=?, tracked_port=? WHERE mac=?
+        """, (new_switch, new_port, mac))
+        self._conn.commit()
+
+    def list_port_history(self, limit: int = 200) -> list[dict]:
+        """Full audit log, newest first - acknowledging an entry never deletes it, it's
+        still here for the record. limit is just a sane page cap, not a retention policy."""
+        rows = self._conn.execute("""
+            SELECT * FROM port_history ORDER BY changed_at DESC LIMIT ?
+        """, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_unacknowledged_moves(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS c FROM port_history WHERE acknowledged = 0"
+        ).fetchone()
+        return row["c"]
+
+    def acknowledge_move(self, history_id: int) -> None:
+        self._conn.execute(
+            "UPDATE port_history SET acknowledged=1, acknowledged_at=? WHERE id=?",
+            (_now(), history_id),
+        )
+        self._conn.commit()
+
+    def acknowledge_all_moves(self) -> None:
+        self._conn.execute(
+            "UPDATE port_history SET acknowledged=1, acknowledged_at=? WHERE acknowledged=0",
+            (_now(),),
+        )
+        self._conn.commit()
 
     def stale_managed(self, stale_days: int) -> list[ObservedAsset]:
         rows = self._conn.execute("""

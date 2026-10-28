@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Discover — netdisco-netbox-sync{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Discover</h1>
+  <a class="help-link" href="/discover/moves">🔀 Port moves</a>
+  <a class="help-link" href="/docs/discover">? How this works</a>
+</div>
+<p class="lede">End hosts observed via Netdisco's MAC/ARP tables, staged and classified by VLAN intent.</p>
+
+{% if error %}
+<div class="error-box">{{ error }}</div>
+{% endif %}
+
+<div class="summary">
+  {% for state in ("managed", "candidate", "unclassified", "ignore") %}
+  <div class="chip">{{ state }}: <b>{{ summary.get(state, 0) }}</b></div>
+  {% endfor %}
+  {% for k, v in summary.items() if k not in ("managed", "candidate", "unclassified", "ignore", "archived") %}
+  <div class="chip">{{ k }}: <b>{{ v }}</b></div>
+  {% endfor %}
+  <div class="chip">total: <b>{{ total }}</b></div>
+</div>
+
+<div class="card">
+  {% include "_run_panel.html" %}
+</div>
+
+{% if unacknowledged_moves %}
+<a href="/discover/moves" class="btn" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.5rem;margin-bottom:1.5rem">
+  🔀 {{ unacknowledged_moves }} port change{{ "s" if unacknowledged_moves != 1 else "" }} need{{ "" if unacknowledged_moves != 1 else "s" }} review →
+</a>
+{% endif %}
+
+<form class="filters" id="discover-filters-form" method="get" action="/">
+  <details class="filter-dropdown" name="discover-filters">
+    <summary>Classification{% if f_classification %} ({{ f_classification|length }}){% endif %}</summary>
+    <div class="popover popover-filter">
+      <div class="popover-label">Show only</div>
+      {% for c in all_classifications %}
+      <label class="checkbox-row">
+        <input type="checkbox" form="discover-filters-form" name="classification" value="{{ c }}" {{ "checked" if c in f_classification else "" }}>
+        {{ c }}
+      </label>
+      {% endfor %}
+    </div>
+  </details>
+
+  <details class="filter-dropdown" name="discover-filters">
+    <summary>Exclude{% if f_exclude %} ({{ f_exclude|length }}){% endif %}</summary>
+    <div class="popover popover-filter">
+      <div class="popover-label">Hide</div>
+      {% for c in all_classifications %}
+      <label class="checkbox-row">
+        <input type="checkbox" form="discover-filters-form" name="exclude" value="{{ c }}" {{ "checked" if c in f_exclude else "" }}>
+        {{ c }}
+      </label>
+      {% endfor %}
+    </div>
+  </details>
+
+  <details class="filter-dropdown" name="discover-filters">
+    <summary>VLAN{% if f_vlan %} ({{ f_vlan|length }}){% endif %}</summary>
+    <div class="popover popover-filter">
+      <div class="popover-label">Show VLANs</div>
+      {% for v in vlans %}
+      <label class="checkbox-row">
+        <input type="checkbox" form="discover-filters-form" name="vlan" value="{{ v }}" {{ "checked" if v in f_vlan else "" }}>
+        VLAN {{ v }}
+      </label>
+      {% endfor %}
+    </div>
+  </details>
+
+  <select name="vendor" onchange="this.form.submit()">
+    <option value="">All vendors</option>
+    {% for v in vendors %}
+    <option value="{{ v }}" {{ "selected" if f_vendor == v else "" }}>{{ v }}</option>
+    {% endfor %}
+  </select>
+  <input type="text" name="q" placeholder="search mac/ip/hostname" value="{{ f_q }}">
+  <button type="submit" class="secondary">Apply</button>
+  {% if f_classification or f_exclude or f_vlan or f_vendor or f_q %}
+  <a href="/" class="btn secondary" style="text-decoration:none">Clear</a>
+  {% endif %}
+</form>
+
+<table>
+  <thead>
+    <tr>
+      <th>MAC</th><th>IP</th><th>Hostname</th><th>VLAN</th><th>Switch</th><th>Port</th><th>Vendor</th><th>Days</th>
+      <th>Classification</th><th>Detail</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for a in assets %}
+    <tr>
+      <td>{{ a.mac }}</td>
+      <td>{{ a.ip or "—" }}</td>
+      <td>{{ a.hostname or "—" }}</td>
+      <td class="vlan-num">{{ a.vlan or "—" }}</td>
+      <td>{{ a.switch or "—" }}</td>
+      <td>{{ a.port or "—" }}</td>
+      <td>{{ a.vendor or "—" }}</td>
+      <td>{{ "%.1f"|format(a.days_stable) if a.days_stable is not none else "—" }}</td>
+      <td><span class="badge {{ a.classification }}">{{ a.classification }}</span></td>
+      <td class="muted">
+        {% if a.classification == "managed" %}
+          {{ a.netbox_name }} · {{ a.netbox_site }}{% if a.netbox_tenant %} · {{ a.netbox_tenant }}{% endif %}{% if a.netbox_location %} · {{ a.netbox_location }}{% endif %}
+          {% if a.tracked_switch %}<br>last known port: {{ a.tracked_switch }} / {{ a.tracked_port }}{% endif %}
+        {% else %}
+          {{ a.classification_reason }}
+        {% endif %}
+      </td>
+      <td>
+        {% if a.classification in actionable %}
+        <details class="actions" name="row-actions">
+          <summary>⋯</summary>
+          <div class="popover popover-actions">
+            <div class="popover-label">Promote</div>
+            <form method="post" action="/discover/promote/{{ a.mac | urlencode }}">
+              <input type="text" name="name" placeholder="name (optional)">
+              <input type="text" name="role" placeholder="role (optional)">
+              <input type="text" name="site" placeholder="site (optional)">
+              <button type="submit">Promote</button>
+            </form>
+            <form method="post" action="/discover/ignore/{{ a.mac | urlencode }}">
+              <button type="submit" class="secondary">Ignore</button>
+            </form>
+          </div>
+        </details>
+        {% elif a.classification == "managed" %}
+        <details class="actions" name="row-actions">
+          <summary>⋯</summary>
+          <div class="popover popover-actions">
+            <div class="popover-label">Edit managed device</div>
+            <form method="post" action="/discover/edit-managed/{{ a.mac | urlencode }}">
+              <input type="text" name="name" placeholder="name" value="{{ a.netbox_name or '' }}" required>
+              <input type="text" name="role" placeholder="role" value="{{ a.netbox_role or '' }}" required>
+              <input type="text" name="site" placeholder="site" value="{{ a.netbox_site or '' }}" required>
+              <input type="text" name="tenant" placeholder="tenant (optional)" value="{{ a.netbox_tenant or '' }}">
+              <input type="text" name="location" placeholder="location (optional)" value="{{ a.netbox_location or '' }}">
+              <button type="submit">Save</button>
+            </form>
+            <form method="post" action="/discover/unpromote/{{ a.mac | urlencode }}">
+              <button type="submit" class="danger">Unpromote</button>
+            </form>
+          </div>
+        </details>
+        {% else %}
+        <span class="muted">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="11" class="muted">No assets match this filter.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

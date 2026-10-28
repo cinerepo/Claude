@@ -107,11 +107,23 @@ class NetdiscoClient:
                 print(f"  WARN: could not parse node on {ip}: {e}")
         return result
 
-    def get_ip_inventory(self, subnet: str) -> dict[str, str]:
+    def get_ip_inventory(self, subnet: str) -> dict[str, tuple[str, str | None]]:
         """
         Query the IP Inventory report for a subnet.
-        Returns {mac: ip} for all entries found.
+        Returns {mac: (ip, dns)} for all entries found - dns may be None if
+        Netdisco has no reverse-DNS hostname resolved for that IP yet.
         The subnet parameter is required by Netdisco (e.g. '10.1.0.0/18').
+
+        Real bug fixed here: this report's own SQL (Netdisco's
+        Web/Plugin/Report/IpInventory.pm) already returns a dns column
+        alongside ip - the /nodes endpoint discover.py otherwise relies on for
+        hostnames (Node.dns) can never carry one at all, since Netdisco's node
+        table has no ip/dns columns; that data only lives in the separate
+        node_ip table this report already joins. Confirmed live: a real
+        install with a working internal DNS server showed correct hostnames
+        in Netdisco's own UI, but every discovered host here still came back
+        with an empty hostname - this report's dns field was being read into
+        mac_to_ip and then silently discarded.
         """
         resp = self._http.get(
             f"{self._base}/api/v1/report/ip/ipinventory",
@@ -125,13 +137,14 @@ class NetdiscoClient:
             rows = resp.json()
         except Exception:
             return {}
-        mac_to_ip: dict[str, str] = {}
+        mac_to_ip_dns: dict[str, tuple[str, str | None]] = {}
         for row in rows:
             mac = row.get("mac")
             ip  = row.get("ip")
+            dns = row.get("dns") or None
             if mac and ip:
-                mac_to_ip[mac] = ip
-        return mac_to_ip
+                mac_to_ip_dns[mac] = (ip, dns)
+        return mac_to_ip_dns
 
     def get_vlans(self, ip: str) -> list[NetdiscoVlan]:
         resp = self._http.get(

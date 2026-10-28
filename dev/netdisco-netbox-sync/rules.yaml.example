@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# VLAN Classification Rules
+# ---------------------------------------------------------------------------
+# intent options:
+#   infrastructure  → auto-promote to NetBox after min_days_stable
+#   lab             → candidate after min_days_stable (manual promote)
+#   corporate       → candidate after min_days_stable (manual promote)
+#   ignore          → never track, never promote
+#
+# Add a block per VLAN. Unknown VLANs stay "unclassified" until stable,
+# then become "candidate" automatically.
+#
+# default_tenant / default_location are optional, unlike default_role/default_site -
+# leave them out entirely if you don't want that field set on promoted end hosts. This
+# only applies to Pipeline 2 (discover.py, end hosts) - a host genuinely belongs to one
+# VLAN. Infrastructure devices (Pipeline 1, sync.py) use device_overrides below instead,
+# since a switch typically serves many VLANs and its tenant/location is about physical/
+# organizational ownership, not which VLANs happen to pass through it.
+# ---------------------------------------------------------------------------
+
+vlan_policy:
+  "1":
+    intent: ignore
+    description: "Default VLAN — noise"
+
+  "10":
+    intent: lab
+    default_role: Server
+    default_site: <Enter Default Site>
+    default_tenant: <Enter Tenant, optional - delete this line to leave unset>
+    default_location: <Enter Location, optional - delete this line to leave unset>
+    description: "Enter Description"
+
+  "20":
+    intent: lab
+    default_role: Server
+    default_site: <Enter Default Site>
+    description: "Enter Description"
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure Device Overrides (Pipeline 1 - sync.py)
+# ---------------------------------------------------------------------------
+# Explicit per-device site/tenant/location/role, keyed by device name exactly as Netdisco/
+# NetBox report it. NOT derived from VLAN membership - see the note above vlan_policy for
+# why. All four keys are optional per device; omit any (or the whole device) to fall
+# back to config.yaml's flat default_site/default_tenant/default_location (site/tenant/
+# location) or the automatic vendor/model detection (role - see _device_role() in
+# transformer.py: Fortinet -> Firewall, Cisco Catalyst -> Switch, Cisco ASR/ISR/CSR/Nexus
+# -> Router, everything else -> Network Device).
+#
+# Real bug this fixes: NetBox's own Device uniqueness is (name, site, tenant) together -
+# manually changing a device's Site or Tenant in the NetBox UI without sync.py also
+# sending the same value causes the next sync to create a duplicate device, since the
+# reconciler can no longer find a match on that natural key. Applies to site exactly the
+# same way it does to tenant - don't reassign an infrastructure device's Site by hand in
+# NetBox without also setting it here. role has no such duplication risk (it's not part
+# of the uniqueness key) - it's here purely because the vendor/model heuristic can't know
+# about a custom role taxonomy (e.g. distinguishing a core switch from an access switch).
+# ---------------------------------------------------------------------------
+device_overrides: {}
+  # core-switch-a:
+  #   site: "Enter Site"
+  #   tenant: "Enter Tenant"
+  #   location: "Enter Location"
+  #   role: "Enter Role, optional - overrides the automatic vendor/model detection"
+
+
+# IPs ending in these suffixes are gateway addresses — already managed as
+# Device SVIs in NetBox. Never create a second device record for them.
+gateway_suffixes:
+  - ".1"
+  - ".2"
+
+
+# ---------------------------------------------------------------------------
+# IP Inventory Subnets
+# ---------------------------------------------------------------------------
+# Netdisco's IP Inventory report (Reports > IP > IP Inventory) requires a
+# subnet parameter. List every CIDR range that covers hosts you want to
+# enrich with IP addresses. The discovery engine will query each subnet and
+# cross-reference MACs in the staging DB.
+#
+# Be specific: /18 or /24 ranges. Avoid /8 — Netdisco may time out or
+# return too many historical records.
+#
+# Leave empty to skip IP enrichment (nodes will be MAC-only).
+# ---------------------------------------------------------------------------
+ip_inventory_subnets:
+  - "10.20.0.0/18"       # example - replace with a real subnet from your network
+  - "172.16.0.0/16"      # example - add/remove entries as needed, or leave this list empty

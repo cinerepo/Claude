@@ -10,19 +10,58 @@ automatically once they've been stable for MIN_DAYS_STABLE days. Assets on
 'promote' command — those device classes are too unpredictable to trust
 with auto-generated names/roles.
 """
+import re
 import sys
 import argparse
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from config import load_config
 from netdisco_client import NetdiscoClient
 from staging import StagingDB, ObservedAsset, days_until_prune
 from classifier import load_rules, load_consumer_vendors, classify, vlan_defaults
+from models import NetdiscoNode
+from lifecycle import NetBoxClient
 from netboxlabs.diode.sdk import DiodeClient
 from netboxlabs.diode.sdk.ingester import (
-    Device, DeviceRole, DeviceType, Entity, IPAddress,
-    Interface, Manufacturer, Site
+    CustomFieldValue, Device, DeviceRole, DeviceType, Entity, IPAddress,
+    Interface, Location, Manufacturer, Site, Tenant
 )
+from google.protobuf.timestamp_pb2 import Timestamp
+
+# Matches aggregate/uplink interface names (Port-channel9, Po9, Trunk1, Bundle-Ether9,
+# Eth-Trunk9) - used to prefer a real access-layer sighting over a transit uplink when
+# the same MAC is seen on multiple devices in one run (see _pick_best_sighting below).
+_UPLINK_PORT_RE = re.compile(r"^(port-channel|po|trunk|bundle-ether|eth-trunk)\d", re.IGNORECASE)
+
+
+def _is_uplink_port(port: str | None) -> bool:
+    return bool(port) and bool(_UPLINK_PORT_RE.match(port))
+
+
+def _pick_best_sighting(
+    nodes: list[NetdiscoNode], port_mac_counts: dict[tuple[str, str], int]
+) -> NetdiscoNode:
+    """On a large L2 network, the same end host legitimately shows up in multiple
+    devices' own MAC tables at once - the real edge switch's access port, AND every
+    core/agg switch it transits through via an uplink (that's how L2 topology mapping
+    works at all). Naively using whichever device happens to be processed last in a
+    given run flaps the recorded switch/port back and forth between the real access
+    port and a transit uplink with zero correctness signal behind it - confirmed live,
+    exactly the "Ethernet1/24 <-> Port-channel9" flapping this exists to fix.
+
+    Two-tier heuristic: (1) prefer sightings whose port name doesn't look like an
+    aggregate/uplink interface - a real host is never plugged into a Port-channel
+    itself. (2) Among whatever's left, prefer the port with the fewest total MACs
+    learned on it this run - a genuine access port serves one host (or a handful),
+    while an uplink/aggregate port relays an entire downstream segment's worth of
+    traffic and will always have a much higher MAC count.
+    """
+    if len(nodes) == 1:
+        return nodes[0]
+    non_uplink = [n for n in nodes if not _is_uplink_port(n.port)]
+    candidates = non_uplink or nodes
+    return min(candidates, key=lambda n: port_mac_counts[(n.switch, n.port)])
 
 try:
     from mac_vendor_lookup import MacLookup
@@ -241,15 +280,15 @@ def cmd_run(config, db):
     nd = NetdiscoClient(config)
     nd.login()
 
-    # Build MAC→IP lookup from configured subnets before processing nodes
-    mac_to_ip: dict[str, str] = {}
+    # Build MAC→(IP, DNS) lookup from configured subnets before processing nodes
+    mac_to_ip_dns: dict[str, tuple[str, str | None]] = {}
     if rules.ip_inventory_subnets:
         print(f"[netdisco] pulling IP inventory for {len(rules.ip_inventory_subnets)} subnet(s)...")
         for subnet in rules.ip_inventory_subnets:
             print(f"  {subnet}...")
             entries = nd.get_ip_inventory(subnet)
-            mac_to_ip.update(entries)
-        print(f"  {len(mac_to_ip)} MAC→IP mappings found")
+            mac_to_ip_dns.update(entries)
+        print(f"  {len(mac_to_ip_dns)} MAC→IP mappings found")
 
     print("[netdisco] fetching infrastructure devices for node discovery...")
     devices = nd.get_all_devices()
@@ -257,86 +296,114 @@ def cmd_run(config, db):
 
     counts = {"new": 0, "updated": 0, "classified": 0}
     to_auto_promote: list[ObservedAsset] = []
+    # Real gap found live: once an asset reached "managed" with a netbox_name, this run
+    # only ever updated the LOCAL staging DB's own last_seen for it - never touched Diode/
+    # NetBox again. A promoted device's NetBox record was effectively frozen forever, with
+    # no way to tell "still there, just quiet" from "gone six months ago" (see lifecycle.py
+    # for the staleness state machine this heartbeat data actually feeds). Collected here,
+    # pushed in the same DiodeClient session as to_auto_promote below.
+    to_heartbeat: list[ObservedAsset] = []
 
+    # Collect every sighting across all devices before deciding which switch/port is
+    # each MAC's real access-layer location - see _pick_best_sighting's own docstring
+    # for why this can't be decided per-device as each one is pulled.
+    sightings: dict[str, list[NetdiscoNode]] = defaultdict(list)
+    port_mac_counts: dict[tuple[str, str], int] = defaultdict(int)
     for device in devices:
         print(f"  pulling nodes from {device.display_name} ({device.ip})...")
         nodes = nd.get_nodes(device.ip)
         print(f"    {len(nodes)} nodes")
-
         for node in nodes:
-            days_stable = _days_between(node.time_first, node.time_last)
+            sightings[node.mac].append(node)
+            port_mac_counts[(node.switch, node.port)] += 1
 
-            # OUI vendor lookup — node table rarely carries vendor
-            vendor = node.vendor or _oui_vendor(node.mac)
+    for mac, mac_nodes in sightings.items():
+        node = _pick_best_sighting(mac_nodes, port_mac_counts)
 
-            # IP enrichment from ipinventory report
-            node_ip = node.ip or mac_to_ip.get(node.mac)
+        days_stable = _days_between(node.time_first, node.time_last)
 
-            existing = db.get_by_mac(node.mac)
-            is_new = existing is None
+        # OUI vendor lookup — node table rarely carries vendor
+        vendor = node.vendor or _oui_vendor(node.mac)
 
-            asset = ObservedAsset(
-                mac=node.mac,
-                ip=node_ip,
-                vlan=node.vlan,
-                switch=node.switch,
-                port=node.port,
-                vendor=vendor,
-                hostname=node.dns,
-                first_seen=node.time_first,
-                last_seen=node.time_last,
-                days_stable=days_stable,
-                last_evaluated=_now(),
-            )
+        # IP/DNS enrichment from ipinventory report - node.ip/node.dns are always empty
+        # from the /nodes endpoint itself (Netdisco's node table has no ip/dns columns at
+        # all, see get_ip_inventory()'s own docstring), so this ipinventory lookup is the
+        # only real source for both.
+        ip_dns = mac_to_ip_dns.get(node.mac)
+        node_ip = node.ip or (ip_dns[0] if ip_dns else None)
+        node_dns = node.dns or (ip_dns[1] if ip_dns else None)
 
-            # Only skip reclassification for states confirmed outside the classifier:
-            #   managed + netbox_name  → actually pushed to NetBox (promote command or auto-promote)
-            #   ignore + ignore_reason → set by 'ignore' command
-            # A "managed" row with no netbox_name never actually reached NetBox
-            # (e.g. a promotion_failed retry, or a legacy row from before
-            # auto-promote existed) — re-evaluate and retry it.
-            # Auto-ignores (consumer vendor rule) have no ignore_reason and
-            # should be re-evaluated when the vendor list changes.
-            is_human_locked = existing and (
-                (existing.classification == "managed" and existing.netbox_name) or
-                (existing.classification == "ignore" and existing.ignore_reason)
-            )
-            if is_human_locked:
-                db.upsert(asset)
-                continue
+        existing = db.get_by_mac(node.mac)
+        is_new = existing is None
 
-            if node_ip and node_ip in known_device_ips:
-                # This IP belongs to a device Netdisco already polls via SNMP —
-                # it's sync.py's job to push it with full inventory data.
-                # Promoting it here too would create a duplicate NetBox device
-                # (host workaround is for devices sync.py can't reach via SNMP).
-                classification, reason = "ignore", (
-                    f"{node_ip} is an SNMP-polled device in Netdisco's inventory — "
-                    f"managed via sync.py, not the host workaround"
-                )
-            else:
-                classification, reason = classify(
-                    asset, rules, consumer_vendors, config.min_days_stable
-                )
-            asset.classification = classification
-            asset.classification_reason = reason
+        asset = ObservedAsset(
+            mac=node.mac,
+            ip=node_ip,
+            vlan=node.vlan,
+            switch=node.switch,
+            port=node.port,
+            vendor=vendor,
+            hostname=node_dns,
+            first_seen=node.time_first,
+            last_seen=node.time_last,
+            days_stable=days_stable,
+            last_evaluated=_now(),
+        )
 
+        # Only skip reclassification for states confirmed outside the classifier:
+        #   managed + netbox_name  → actually pushed to NetBox (promote command or auto-promote)
+        #   ignore + ignore_reason → set by 'ignore' command
+        # A "managed" row with no netbox_name never actually reached NetBox
+        # (e.g. a promotion_failed retry, or a legacy row from before
+        # auto-promote existed) — re-evaluate and retry it.
+        # Auto-ignores (consumer vendor rule) have no ignore_reason and
+        # should be re-evaluated when the vendor list changes.
+        is_human_locked = existing and (
+            (existing.classification == "managed" and existing.netbox_name) or
+            (existing.classification == "ignore" and existing.ignore_reason)
+        )
+        if is_human_locked:
             db.upsert(asset)
-            counts["new" if is_new else "updated"] += 1
-            if classification != "unclassified":
-                counts["classified"] += 1
-            if classification == "managed":
-                to_auto_promote.append(asset)
+            # Only "managed" gets a heartbeat - "ignore" was never pushed to NetBox in
+            # the first place, nothing to refresh. Re-fetch after upsert rather than
+            # reusing `existing` (the pre-upsert snapshot) or the freshly-built `asset`
+            # (has no netbox_* fields at all) - upsert() just refreshed switch/port/ip/
+            # last_seen for this row, and move detection below needs that FRESH
+            # switch/port sitting alongside the tracked_switch/port upsert()
+            # deliberately never touches, in one consistent row.
+            if existing.classification == "managed" and existing.netbox_name:
+                to_heartbeat.append(db.get_by_mac(node.mac))
+            continue
+
+        if node_ip and node_ip in known_device_ips:
+            # This IP belongs to a device Netdisco already polls via SNMP —
+            # it's sync.py's job to push it with full inventory data.
+            # Promoting it here too would create a duplicate NetBox device
+            # (host workaround is for devices sync.py can't reach via SNMP).
+            classification, reason = "ignore", (
+                f"{node_ip} is an SNMP-polled device in Netdisco's inventory — "
+                f"managed via sync.py, not the host workaround"
+            )
+        else:
+            classification, reason = classify(
+                asset, rules, consumer_vendors, config.min_days_stable
+            )
+        asset.classification = classification
+        asset.classification_reason = reason
+
+        db.upsert(asset)
+        counts["new" if is_new else "updated"] += 1
+        if classification != "unclassified":
+            counts["classified"] += 1
+        if classification == "managed":
+            to_auto_promote.append(asset)
 
     nd.close()
 
     print(f"\n[staging] new={counts['new']}  updated={counts['updated']}  "
           f"classified={counts['classified']}")
 
-    if to_auto_promote:
-        print(f"\n[auto-promote] {len(to_auto_promote)} infrastructure asset(s) "
-              f"newly stable — pushing to NetBox...")
-        promoted, failed = 0, 0
+    if to_auto_promote or to_heartbeat:
         with DiodeClient(
             target=config.diode_target,
             app_name="netdisco-netbox-sync",
@@ -344,16 +411,104 @@ def cmd_run(config, db):
             client_id=config.diode_client_id,
             client_secret=config.diode_client_secret,
         ) as diode:
-            for asset in to_auto_promote:
-                ok = _promote_asset(
-                    diode, db, config, rules, asset,
-                    reason=f"{asset.classification_reason} — auto-promoted",
-                )
-                if ok:
-                    promoted += 1
-                else:
-                    failed += 1
-        print(f"[auto-promote] promoted={promoted}  failed={failed}")
+            if to_auto_promote:
+                print(f"\n[auto-promote] {len(to_auto_promote)} infrastructure asset(s) "
+                      f"newly stable — pushing to NetBox...")
+                promoted, failed = 0, 0
+                for asset in to_auto_promote:
+                    ok = _promote_asset(
+                        diode, db, config, rules, asset,
+                        reason=f"{asset.classification_reason} — auto-promoted",
+                    )
+                    if ok:
+                        promoted += 1
+                    else:
+                        failed += 1
+                print(f"[auto-promote] promoted={promoted}  failed={failed}")
+
+            if to_heartbeat:
+                # Refreshes last_discovered on already-managed devices - the fix for the
+                # "promoted device's NetBox record is frozen forever" gap. Failures here are
+                # deliberately silent/non-fatal (no classification change, no retry
+                # bookkeeping) - a transient heartbeat miss just means lifecycle.py sees a
+                # slightly older last_discovered next time, not a real problem worth
+                # disturbing an already-successfully-managed device's state over.
+                print(f"\n[heartbeat] refreshing last_discovered for "
+                      f"{len(to_heartbeat)} already-managed asset(s)...")
+                ok_count, err_count, moved_count = 0, 0, 0
+                # Opportunistic netbox_device_id backfill - for any asset promoted before
+                # this existed (or where the lookup right after promote didn't find it yet,
+                # Diode's write being async), try again on every heartbeat until it
+                # succeeds. Non-fatal and entirely optional: NETBOX_TOKEN/NETBOX_URL not
+                # being set just means this never fills in, same as lifecycle.py's own
+                # "skip cleanly if not configured" behavior. Once set, the webui's edit
+                # route can PATCH the real device directly instead of re-pushing through
+                # Diode's create-or-match (see webapp.py's discover_edit_managed route).
+                nb_client = None
+                if config.netbox_url and config.netbox_token:
+                    nb_client = NetBoxClient(config.netbox_url, config.netbox_token)
+                for existing in to_heartbeat:
+                    try:
+                        vendor_clean = _clean_vendor(existing.vendor or _oui_vendor(existing.mac))
+                        entities = _build_entities(
+                            existing.netbox_name, existing.netbox_role, existing.netbox_site,
+                            vendor_clean, _default_model(vendor_clean), existing.ip,
+                            effective_tenant=existing.netbox_tenant,
+                            effective_location=existing.netbox_location,
+                            custom_fields={
+                                "discovery_source": CustomFieldValue(text="netdisco"),
+                                "last_discovered": CustomFieldValue(datetime=_now_ts()),
+                            },
+                            dns_name=existing.hostname or "",
+                        )
+                        response = diode.ingest(entities=entities)
+                        if response.errors:
+                            print(f"    WARN {existing.netbox_name}: {response.errors}")
+                            err_count += 1
+                            continue
+                        ok_count += 1
+
+                        if nb_client and not existing.netbox_device_id:
+                            try:
+                                found = nb_client.find_device(
+                                    existing.netbox_name, site=existing.netbox_site,
+                                    tenant=existing.netbox_tenant,
+                                )
+                                if found:
+                                    db.update_netbox_fields(existing.mac, netbox_device_id=found["id"])
+                            except Exception as e:
+                                # Best-effort - a lookup failure here shouldn't count as a
+                                # heartbeat error, the heartbeat push itself already succeeded.
+                                print(f"    (netbox_device_id lookup failed for {existing.netbox_name}: {e})")
+
+                        # Switch/port move tracking is purely local bookkeeping (staging DB
+                        # only, see staging.py's own comment) - Diode doesn't support Cable
+                        # ingestion yet (confirmed live), so this was deliberately scoped
+                        # back from "push a real NetBox Cable" to "keep a record of when a
+                        # device's port changed" instead of hand-rolling that reconciliation
+                        # directly against NetBox's REST API.
+                        if existing.switch and existing.port and (
+                            existing.switch != existing.tracked_switch
+                            or existing.port != existing.tracked_port
+                        ):
+                            if existing.tracked_switch:
+                                db.record_port_change(
+                                    existing.mac, existing.netbox_name,
+                                    existing.tracked_switch, existing.tracked_port,
+                                    existing.switch, existing.port,
+                                )
+                                print(f"    MOVED {existing.netbox_name}: "
+                                      f"{existing.tracked_switch}/{existing.tracked_port} "
+                                      f"-> {existing.switch}/{existing.port}")
+                                moved_count += 1
+                            else:
+                                db.set_cabled_port(existing.mac, existing.switch, existing.port)
+                    except Exception as e:
+                        print(f"    WARN {existing.netbox_name}: {e}")
+                        err_count += 1
+                print(f"[heartbeat] refreshed={ok_count}  errors={err_count}  moved={moved_count}")
+                if nb_client:
+                    nb_client.close()
 
     pruned = db.prune_expired(config.prune_days)
     if pruned:
@@ -528,13 +683,37 @@ def cmd_promote(args, config, db):
         sys.exit(1)
 
 
-def _build_entities(effective_name, effective_role, effective_site, vendor_clean, model, ip):
+def _build_entities(effective_name, effective_role, effective_site, vendor_clean, model, ip,
+                     effective_tenant=None, effective_location=None, custom_fields=None,
+                     dns_name=""):
     """Build Diode entities for a device. Order matters for reconciliation:
     1. Interface (must exist before IP can be assigned to it)
     2. IPAddress assigned to the interface
     3. Device with primary_ip4 pointing to that IP
+
+    effective_tenant/effective_location must match device_ref exactly - tenant is part of
+    NetBox's own Device uniqueness constraint (name, site, tenant), so a mismatch between
+    device_ref (the interface/IP stub) and the real device entity would itself become a
+    second, incorrect natural key (see transformer.py's own comment for the full story).
+    custom_fields (discovery_source/last_discovered) only needs to be on the real device
+    entity, not the stub - it isn't part of any uniqueness constraint.
     """
     entities = []
+    tenant_obj = Tenant(name=effective_tenant) if effective_tenant else None
+    location_obj = Location(name=effective_location) if effective_location else None
+
+    # Diode only auto-creates a referenced sub-object (Tenant, Location) when it also
+    # appears as its own top-level Entity in the ingest batch - a nested reference inside
+    # Device(tenant=...) alone is not enough to make Diode create it (confirmed live
+    # against the real lab NetBox: nested-only left tenant/location=None on the device and
+    # no Tenant/Location object created, with no error surfaced - see transformer.py's
+    # matching comment for the full story). No cross-call dedup here since each call to
+    # this function already gets its own single diode.ingest() - an idempotent resend of
+    # the same Tenant/Location natural key across separate promote calls is harmless.
+    if tenant_obj:
+        entities.append(Entity(tenant=tenant_obj))
+    if location_obj:
+        entities.append(Entity(location=Location(name=effective_location, site=Site(name=effective_site))))
 
     if ip:
         # 'primary' is a placeholder interface name until SNMP enrichment
@@ -543,6 +722,8 @@ def _build_entities(effective_name, effective_role, effective_site, vendor_clean
             name=effective_name,
             role=DeviceRole(name=effective_role),
             site=Site(name=effective_site),
+            tenant=tenant_obj,
+            location=location_obj,
             device_type=DeviceType(model=model, manufacturer=Manufacturer(name=vendor_clean)),
         )
         entities.append(Entity(interface=Interface(
@@ -552,6 +733,7 @@ def _build_entities(effective_name, effective_role, effective_site, vendor_clean
         )))
         ip_addr = IPAddress(
             address=f"{ip}/32",
+            dns_name=dns_name or "",
             assigned_object_interface=Interface(
                 name="primary",
                 type="virtual",
@@ -563,15 +745,21 @@ def _build_entities(effective_name, effective_role, effective_site, vendor_clean
             name=effective_name,
             role=DeviceRole(name=effective_role),
             site=Site(name=effective_site),
+            tenant=tenant_obj,
+            location=location_obj,
             device_type=DeviceType(model=model, manufacturer=Manufacturer(name=vendor_clean)),
             primary_ip4=IPAddress(address=f"{ip}/32"),
+            custom_fields=custom_fields or {},
         )))
     else:
         entities.append(Entity(device=Device(
             name=effective_name,
             role=DeviceRole(name=effective_role),
             site=Site(name=effective_site),
+            tenant=tenant_obj,
+            location=location_obj,
             device_type=DeviceType(model=model, manufacturer=Manufacturer(name=vendor_clean)),
+            custom_fields=custom_fields or {},
         )))
 
     return entities
@@ -586,9 +774,14 @@ def _promote_asset(diode, db, config, rules, asset, *, name=None, role=None, sit
     the next 'run' will re-classify and retry it automatically.
     Returns True on success, False on failure.
     """
-    site_default, role_default = vlan_defaults(asset.vlan, rules, config.default_site, config.default_role)
+    site_default, role_default, tenant_default, location_default = vlan_defaults(
+        asset.vlan, rules, config.default_site, config.default_role,
+        config.default_tenant, config.default_location,
+    )
     effective_site = site or site_default
     effective_role = role or role_default
+    effective_tenant = tenant_default
+    effective_location = location_default
     effective_name = name or asset.hostname or asset.ip or asset.mac
     vendor_clean   = _clean_vendor(vendor or asset.vendor or _oui_vendor(asset.mac))
     model          = _default_model(vendor_clean)
@@ -596,7 +789,16 @@ def _promote_asset(diode, db, config, rules, asset, *, name=None, role=None, sit
     print(f"  {asset.mac} ({asset.ip or 'no IP'})  name={effective_name!r}  "
           f"role={effective_role!r}  site={effective_site!r}  vendor={vendor_clean!r}")
 
-    entities = _build_entities(effective_name, effective_role, effective_site, vendor_clean, model, asset.ip)
+    custom_fields = {
+        "discovery_source": CustomFieldValue(text="netdisco"),
+        "last_discovered": CustomFieldValue(datetime=_now_ts()),
+    }
+    entities = _build_entities(
+        effective_name, effective_role, effective_site, vendor_clean, model, asset.ip,
+        effective_tenant=effective_tenant, effective_location=effective_location,
+        custom_fields=custom_fields,
+        dns_name=asset.hostname or "",
+    )
     response = diode.ingest(entities=entities)
 
     if response.errors:
@@ -611,8 +813,17 @@ def _promote_asset(diode, db, config, rules, asset, *, name=None, role=None, sit
         netbox_name=effective_name,
         netbox_site=effective_site,
         netbox_role=effective_role,
+        netbox_tenant=effective_tenant,
+        netbox_location=effective_location,
         promoted_at=_now(),
     )
+    # Purely local bookkeeping - not pushed to NetBox as any kind of object (Diode doesn't
+    # support Cable ingestion yet, confirmed live; hand-rolling that reconciliation directly
+    # against NetBox's REST API was considered and explicitly not worth it just for this -
+    # see this project's own notes). First-time here, so no history row, nothing to compare
+    # against yet - real move detection happens on later heartbeats (cmd_run()).
+    if asset.switch and asset.port:
+        db.set_cabled_port(asset.mac, asset.switch, asset.port)
     print(f"    Done. {effective_name!r} is now managed in NetBox.")
     return True
 
@@ -698,6 +909,12 @@ def _clean_vendor(vendor: str | None) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _now_ts() -> Timestamp:
+    ts = Timestamp()
+    ts.FromDatetime(datetime.now(timezone.utc))
+    return ts
 
 
 if __name__ == "__main__":

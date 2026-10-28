@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}netdisco-netbox-sync{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version() }}">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/autogrow.js?v={{ static_version() }}"></script>
+  <script src="/static/popover-position.js?v={{ static_version() }}"></script>
+</head>
+<body>
+  <nav>
+    <span class="title">netdisco-netbox-sync</span>
+    <a href="/" class="{{ 'active' if active == 'discover' else '' }}">Discover</a>
+    <a href="/config" class="{{ 'active' if active == 'config' else '' }}">Config</a>
+    <a href="/lifecycle" class="{{ 'active' if active == 'lifecycle' else '' }}">Lifecycle</a>
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

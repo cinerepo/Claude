@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Config — netdisco-netbox-sync{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Config</h1>
+  <a class="help-link" href="/docs/config">? How this works</a>
+</div>
+<p class="lede">Edits are validated against the real parser before touching <code>rules.yaml</code> — a broken edit is rejected and the file is left untouched. A timestamped backup is kept on every successful save.</p>
+
+{% if error %}
+<div class="error-box"><b>Not saved.</b> {{ error }}</div>
+{% endif %}
+
+<div class="card">
+  {% include "_run_panel.html" %}
+</div>
+
+{# HTML forms can't structurally span multiple <td>s within a <tr> (browsers detach/
+   reparent a <form> that isn't fully contained in one cell) - so each row's inputs live
+   directly in their <td>s and reference an empty, out-of-band <form id="..."> via the
+   standard form="id" attribute instead of wrapping the row in a literal <form> tag. #}
+
+<h2>VLAN policy</h2>
+{% for vid, p in vlans %}<form id="vlan-{{ vid }}" method="post" action="/config/vlan"></form>{% endfor %}
+<form id="vlan-new" method="post" action="/config/vlan"></form>
+<table>
+  <thead>
+    <tr>
+      <th>VLAN</th><th>Intent</th><th>Role</th><th>Site</th><th>Tenant</th>
+      <th>Location</th><th>Description</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for vid, p in vlans %}
+    <tr>
+      <td><input form="vlan-{{ vid }}" type="text" name="vid" value="{{ vid }}" readonly style="width:3.5rem"></td>
+      <td>
+        <select form="vlan-{{ vid }}" name="intent">
+          {% for i in ("infrastructure", "lab", "corporate", "ignore") %}
+          <option value="{{ i }}" {{ "selected" if p.intent == i else "" }}>{{ i }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td><input form="vlan-{{ vid }}" type="text" name="default_role" value="{{ p.default_role or '' }}" style="width:7rem"></td>
+      <td><input form="vlan-{{ vid }}" type="text" name="default_site" value="{{ p.default_site or '' }}" style="width:7rem"></td>
+      <td><input form="vlan-{{ vid }}" type="text" name="default_tenant" value="{{ p.default_tenant or '' }}" style="width:7rem"></td>
+      <td><input form="vlan-{{ vid }}" type="text" name="default_location" value="{{ p.default_location or '' }}" style="width:7rem"></td>
+      <td><textarea form="vlan-{{ vid }}" name="description" rows="1" style="width:16rem;min-height:2.3rem">{{ p.description or '' }}</textarea></td>
+      <td style="white-space:nowrap">
+        <button form="vlan-{{ vid }}" type="submit">Save</button>
+        <form class="inline" method="post" action="/config/vlan/{{ vid | urlencode }}/delete">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <td><input form="vlan-new" type="text" name="vid" placeholder="vid" style="width:3.5rem"></td>
+      <td>
+        <select form="vlan-new" name="intent">
+          <option value="infrastructure">infrastructure</option>
+          <option value="lab">lab</option>
+          <option value="corporate">corporate</option>
+          <option value="ignore">ignore</option>
+        </select>
+      </td>
+      <td><input form="vlan-new" type="text" name="default_role" placeholder="role" style="width:7rem"></td>
+      <td><input form="vlan-new" type="text" name="default_site" placeholder="site" style="width:7rem"></td>
+      <td><input form="vlan-new" type="text" name="default_tenant" placeholder="optional" style="width:7rem"></td>
+      <td><input form="vlan-new" type="text" name="default_location" placeholder="optional" style="width:7rem"></td>
+      <td><textarea form="vlan-new" name="description" rows="1" placeholder="description" style="width:16rem;min-height:2.3rem"></textarea></td>
+      <td><button form="vlan-new" type="submit">Add VLAN</button></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Netdisco inventory <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— live, pick a device to add or edit its override</span></h2>
+{% if inventory_error %}
+<div class="error-box">{{ inventory_error }}</div>
+{% else %}
+<table>
+  <thead>
+    <tr><th>Device</th><th>IP</th><th>Vendor</th><th>Model</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for d in inventory %}
+    <tr>
+      <td>{{ d.name }}</td>
+      <td class="muted">{{ d.ip }}</td>
+      <td class="muted">{{ d.vendor }}</td>
+      <td class="muted">{{ d.model }}</td>
+      <td style="white-space:nowrap">
+        {% if d.overridden %}<span class="badge managed" style="margin-right:0.4rem">configured</span>{% endif %}
+        <details class="actions" name="config-actions">
+          <summary>⋯</summary>
+          <div class="popover popover-actions">
+            <div class="popover-label">{{ "Edit override" if d.overridden else "Add override" }}</div>
+            <form method="post" action="/config/device-override">
+              <input type="hidden" name="name" value="{{ d.name }}">
+              <input type="text" name="site" placeholder="site (optional)" value="{{ d.site }}">
+              <input type="text" name="tenant" placeholder="tenant (optional)" value="{{ d.tenant }}">
+              <input type="text" name="location" placeholder="location (optional)" value="{{ d.location }}">
+              <input type="text" name="role" placeholder="role (optional, overrides auto-detected)" value="{{ d.role }}">
+              <button type="submit">{{ "Save" if d.overridden else "Add override" }}</button>
+            </form>
+            {% if d.overridden %}
+            <form method="post" action="/config/device-override/{{ d.name | urlencode }}/delete">
+              <button type="submit" class="danger">Delete override</button>
+            </form>
+            {% endif %}
+          </div>
+        </details>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">Netdisco reports no devices.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>IP inventory subnets <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— Netdisco's IP Inventory report only enriches hosts within these ranges</span></h2>
+<table>
+  <thead>
+    <tr><th>Subnet</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for s in subnets %}
+    <tr>
+      <td>{{ s }}</td>
+      <td style="white-space:nowrap">
+        <form class="inline" method="post" action="/config/subnet/delete">
+          <input type="hidden" name="subnet" value="{{ s }}">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="2" class="muted">No subnets configured — IP enrichment is skipped.</td></tr>
+    {% endfor %}
+    <tr>
+      <td colspan="2">
+        <form class="inline" method="post" action="/config/subnet">
+          <input type="text" name="subnet" placeholder="e.g. 10.20.0.0/18" style="width:14rem">
+          <button type="submit">Add subnet</button>
+        </form>
+      </td>
+    </tr>
+  </tbody>
+</table>
+{% endblock %}

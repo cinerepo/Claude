@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Lifecycle docs — netdisco-netbox-sync{% endblock %}
+{% block content %}
+<a class="back-link" href="/lifecycle">← Back to Lifecycle</a>
+<h1>How Lifecycle works</h1>
+<p class="lede">Discover and Config's Sync both only ever <b>observe</b> — they set
+   <code>discovery_source</code>/<code>last_discovered</code> on every push and never decide whether a
+   device is stale. This page is the only thing that reads that data back out of NetBox, computes an
+   age, and decides a staleness state. It's a deliberately separate concern.</p>
+
+<div class="docs">
+  <div class="card">
+    <h3>Discovery states, by age of <code>last_discovered</code></h3>
+    <dl>
+      <dt>active <span class="muted" style="font-weight:400">— under {{ config.lifecycle_active_days }} days</span></dt>
+      <dd>Seen recently. Nothing to worry about.</dd>
+
+      <dt>stale <span class="muted" style="font-weight:400">— {{ config.lifecycle_active_days }}–{{ config.lifecycle_stale_days }} days</span></dt>
+      <dd>Hasn't been re-observed in a while. Native NetBox <code>status</code> is left alone here —
+        going quiet for a bit shouldn't flip a device to offline prematurely.</dd>
+
+      <dt>review <span class="muted" style="font-weight:400">— {{ config.lifecycle_stale_days }}–{{ config.lifecycle_review_days }} days</span></dt>
+      <dd>Worth a human look. Still not touched at the NetBox <code>status</code> level.</dd>
+
+      <dt>decommission_candidate <span class="muted" style="font-weight:400">— {{ config.lifecycle_review_days }}–{{ config.lifecycle_decommission_days }} days</span></dt>
+      <dd>Long gone. NetBox's native <code>status</code> flips to <b>offline</b> here.</dd>
+
+      <dt>mia <span class="muted" style="font-weight:400">— over {{ config.lifecycle_decommission_days }} days</span></dt>
+      <dd>Very long gone. Also flips <code>status</code> to offline.</dd>
+
+      <dt>protected</dt>
+      <dd>Set this manually, directly in NetBox, to pull a device out of this reconciler entirely — it's
+        skipped on every run, the same way Discover treats a human-locked <code>managed</code> asset.
+        Use it for a device you know will go quiet on purpose (decommissioned-but-kept-for-records,
+        seasonal gear, etc.) that you don't want auto-flagged.</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h3>Auto-heal</h3>
+    <p style="color:var(--muted);font-size:0.87rem">There's no special-case "recovery" logic needed —
+      state is recomputed fresh from age on every run, with no memory of what it used to be. A device
+      that gets rediscovered (bumping <code>last_discovered</code>) simply computes back to
+      <code>active</code> the next time this runs, and if its <code>status</code> had been flipped to
+      offline, that gets restored to active too. Confirmed working end-to-end: a device forced into
+      <code>mia</code> healed cleanly back to <code>active</code>/<code>active</code> once it was freshly observed again.</p>
+  </div>
+
+  <div class="card">
+    <h3>Stored state vs. Computed now</h3>
+    <p style="color:var(--muted);font-size:0.87rem"><b>Stored state</b> is whatever's actually sitting
+      in NetBox right now, from the last time the reconciler really ran. <b>Computed now</b> is this
+      page doing the same math live, on every load, purely for display — it never writes anything.
+      When they disagree, you'll see a <span class="muted">pending update</span> tag: that's exactly
+      what would change the next time you click <b>Run Lifecycle Reconciler Now</b> or its cron fires.</p>
+  </div>
+
+  <div class="card">
+    <h3>What this never does</h3>
+    <p style="color:var(--muted);font-size:0.87rem">No deletion, ever, at any state — <code>mia</code>
+      is a flag, not a countdown to removal. Decommissioning a device out of NetBox stays a human
+      decision made directly in NetBox. This page's job stops at telling you what's gone quiet and for
+      how long.</p>
+  </div>
+
+  <div class="card">
+    <h3>Run Lifecycle Reconciler Now</h3>
+    <p style="color:var(--muted);font-size:0.87rem">Runs <code>lifecycle.py</code> for real:</p>
+    <ol>
+      <li>Fetches every NetBox device with <code>discovery_source=netdisco</code> (i.e. everything Discover/Sync have ever pushed).</li>
+      <li>Skips anything already <code>protected</code>.</li>
+      <li>Sets <code>first_discovered</code> the first time it sees a device that doesn't have one yet.</li>
+      <li>Computes age from <code>last_discovered</code>, maps it to a state, and writes <code>discovery_state</code> (and native <code>status</code>, only at the two ends of the scale) if it changed.</li>
+      <li>Prints a summary, including a decommission-candidate list to review — never acts on it automatically.</li>
+    </ol>
+  </div>
+</div>
+{% endblock %}

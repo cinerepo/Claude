@@ -1,0 +1,389 @@
+/* Design language pulled from https://home.cinesys.io/ (real values read out of their
+   published Webflow CSS, not guessed): pure black background, #876afa purple accent with
+   a glow shadow, glass/blurred secondary surfaces (backdrop-filter + translucent white
+   border), 9px button radius / 16-20px panel radius, #07020b near-black card surface.
+   Their custom display font ("Ppneuemachina") is proprietary and not vendored here -
+   substituted with a bold system sans fallback stack instead. */
+:root {
+  --bg: #000;
+  --panel: #07020b;
+  --panel-glass: #ffffff08;
+  --border: #ffffff26;
+  --border-soft: #ffffff14;
+  --text: #fff;
+  --muted: #ffffff99;
+  --faint: #ffffff59;
+
+  --accent: #876afa;
+  --accent-hover: #6141dc;
+  --accent-glow: #876afa80;
+  --pink: #ff80af;
+  --blue: #3e92cc;
+
+  --good: #3ecf8e;
+  --warn: #e0a63e;
+  --bad: #ff6b6b;
+  --neutral: #9aa1ac;
+
+  --radius-panel: 20px;
+  --radius-card: 16px;
+  --radius-btn: 9px;
+  --radius-pill: 999px;
+
+  font-size: 15px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 1.75rem;
+  background: rgba(0,0,0,0.75);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+nav .title {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-right: 1.5rem;
+  background: linear-gradient(90deg, #fff, var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius-btn);
+  border: 1px solid transparent;
+  transition: color .15s, border-color .15s, background-color .15s;
+}
+
+nav a:hover { color: var(--text); background: var(--panel-glass); }
+nav a.active { color: var(--text); border-color: var(--border); background: var(--panel-glass); }
+
+main { padding: 2rem 2.5rem 4rem; max-width: 2000px; margin: 0 auto; }
+
+h1 {
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.3rem;
+}
+h2 {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  margin: 2.5rem 0 0.9rem;
+}
+p.lede { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.9rem; max-width: 70ch; }
+code { background: var(--panel-glass); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85em; }
+
+/* --- glass panel, the base surface for cards/tables/log boxes --- */
+.card, table, .run-log {
+  background: var(--panel-glass);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.card { padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+
+/* --- summary chips --- */
+.summary { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.summary .chip {
+  background: var(--panel-glass);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.summary .chip b { color: var(--text); font-weight: 700; }
+
+/* --- filters / glass form fields --- */
+.filters { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.5rem; margin-bottom: 1.5rem; align-items: center; }
+
+select, input[type="text"], input[type="search"], textarea {
+  background: var(--panel-glass);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-btn);
+  font-size: 0.85rem;
+  font-family: inherit;
+  transition: border-color .15s, background-color .15s;
+}
+select:focus, input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: #ffffff10;
+}
+input::placeholder, textarea::placeholder { color: var(--faint); }
+select option { background: #111; color: var(--text); }
+
+/* --- tables --- */
+/* No overflow:hidden here on purpose - it used to clip the ⋯ action popovers on rows near
+   the bottom of a table (the "textbox disappears against the black edge" bug: the popover
+   was rendering, just invisible past the table's own clipped boundary). Corner rounding is
+   done directly on the corner cells below instead, so it still looks rounded without
+   clipping anything absolutely-positioned inside. */
+table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 2rem; }
+thead tr:first-child th:first-child { border-top-left-radius: var(--radius-panel); }
+thead tr:first-child th:last-child { border-top-right-radius: var(--radius-panel); }
+tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius-panel); }
+tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius-panel); }
+th, td {
+  text-align: left; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border-soft); font-size: 0.83rem; vertical-align: middle;
+}
+th:last-child, td:last-child { border-right: none; }
+th { color: var(--faint); font-weight: 700; text-transform: uppercase; font-size: 0.68rem;
+     letter-spacing: 0.06em; background: #ffffff05; }
+tr:last-child td { border-bottom: none; }
+tbody tr { transition: background-color .12s; }
+tbody tr:nth-child(even) { background: #ffffff04; }
+tbody tr:hover { background: #ffffff0c; }
+
+/* --- badges: translucent glass pill, same semantic hue mapping throughout --- */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+.badge.managed, .badge.active { background: #3ecf8e1f; color: var(--good); border-color: #3ecf8e40; }
+.badge.candidate, .badge.stale, .badge.review { background: #e0a63e1f; color: var(--warn); border-color: #e0a63e40; }
+.badge.ignore, .badge.decommission_candidate, .badge.mia, .badge.offline { background: #ff6b6b1f; color: var(--bad); border-color: #ff6b6b40; }
+.badge.unclassified, .badge.promotion_failed, .badge.protected, .badge.none, .badge.unknown { background: #9aa1ac1f; color: var(--neutral); border-color: #9aa1ac40; }
+.badge.archived { background: #9aa1ac1f; color: var(--neutral); border-color: #9aa1ac40; }
+
+/* --- buttons, matching cinesys.io's .button / .button.is-secondary.is-alternate --- */
+button, .btn {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid transparent;
+  padding: 0.5rem 1.1rem;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+  box-shadow: 0 2px 20px 1px var(--accent-glow);
+  transition: background-color .15s, color .15s, box-shadow .15s;
+}
+button:hover { background: #fff; color: #000; box-shadow: none; }
+
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+button.secondary:hover { background: var(--panel-glass); color: var(--text); }
+
+button.danger {
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid #ff6b6b40;
+  box-shadow: none;
+}
+button.danger:hover { background: #ff6b6b1a; color: var(--bad); }
+
+button:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+
+form.inline { display: inline; }
+form.row-form { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+form.row-form input { width: 8rem; }
+
+/* --- shared glass popover base, used by both the actions disclosure and filter
+   dropdowns below --- */
+.popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  z-index: 20;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 0.9rem;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  /* Reset white-space: some triggers (e.g. config.html's Save/Delete <td>) set nowrap on
+     an ancestor for their own layout reasons - inherited, it stopped these width:100%
+     inline-block inputs/buttons from wrapping onto their own lines, so they rendered side
+     by side spilling out past the box instead of stacked inside it. */
+  white-space: normal;
+}
+.popover-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-bottom: 0.4rem; font-weight: 700; }
+
+/* --- actions disclosure: click-to-reveal glass popover, replacing always-on inputs --- */
+/* display: inline-block (not the <details> default of block) - otherwise it stretches to
+   fill the whole table cell, which put visible daylight between the actual button and its
+   popover (anchored to the stretched box's edge, not the button) and pushed the button onto
+   its own line below anything else in the cell (like the "configured" badge) instead of
+   sitting inline next to it. */
+details.actions { position: relative; display: inline-block; vertical-align: middle; }
+/* z-index only promoted while open - backdrop-filter (used on every .card/table/.run-log
+   for the glass panel look) forces the browser to create a new stacking context on each
+   of those elements, even though they never set z-index themselves. Without this, a
+   popover opened on a row near the bottom of one table could end up rendering behind a
+   later sibling table/section (e.g. config.html's "IP inventory subnets", added right
+   after the inventory table) - the popover's .popover z-index:20 only outranks siblings
+   within its own nearest stacking-context ancestor, and that later table quietly
+   established its own via backdrop-filter. Promoting the ancestor itself, not just the
+   popover, is what actually fixes it. */
+details.actions[open] { z-index: 50; }
+details.actions > summary {
+  list-style: none;
+  cursor: pointer;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-weight: 700;
+  user-select: none;
+}
+details.actions > summary::-webkit-details-marker { display: none; }
+details.actions > summary:hover { background: var(--panel-glass); color: var(--text); }
+details.actions[open] > summary { color: var(--text); border-color: var(--accent); }
+
+/* .popover-actions / .popover-filter, not details.actions .popover / details.filter-dropdown
+   .popover - popover-position.js reparents an open popover to <body> so it can escape the
+   backdrop-filter stacking/containing-block trap on every <table> (see that file's own
+   header comment). An ancestor-based selector stops matching the instant that happens - a
+   plain class on the popover element itself, set directly in the template, keeps working
+   regardless of which element is currently its DOM parent. Every margin-bottom bump here
+   silently had zero effect for a while - the selector simply never matched an open
+   (reparented) popover at all. */
+.popover-actions { right: 0; min-width: 17rem; padding: 0.7rem; }
+.popover-actions form { margin-bottom: 0.5rem; }
+.popover-actions form:last-child { margin-bottom: 0; }
+.popover-actions input { width: 100%; margin-bottom: 0.45rem; }
+.popover-actions button { width: 100%; }
+
+/* --- filter dropdowns: same disclosure pattern, checkbox lists for multi-select --- */
+details.filter-dropdown { position: relative; }
+details.filter-dropdown[open] { z-index: 50; }
+details.filter-dropdown > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--border);
+  background: var(--panel-glass);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  user-select: none;
+}
+details.filter-dropdown > summary::-webkit-details-marker { display: none; }
+details.filter-dropdown > summary:hover { border-color: var(--accent); }
+details.filter-dropdown[open] > summary { border-color: var(--accent); color: var(--accent); }
+
+.popover-filter { left: 0; min-width: 12rem; max-height: 17rem; overflow-y: auto; }
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.3rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.checkbox-row:hover { background: var(--panel-glass); }
+.checkbox-row input[type="checkbox"] { accent-color: var(--accent); width: 1rem; height: 1rem; cursor: pointer; }
+
+/* --- run log --- */
+.run-log {
+  padding: 0.9rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  max-height: 340px;
+  overflow-y: auto;
+  margin-top: 0.75rem;
+  color: var(--muted);
+}
+
+.vlan-num { font-size: 1rem; font-weight: 800; letter-spacing: -0.01em; }
+
+/* --- docs sub-pages --- */
+.page-head { display: flex; align-items: baseline; gap: 0.9rem; margin-bottom: 0.3rem; }
+.page-head h1 { margin: 0; }
+.help-link {
+  font-size: 0.78rem; font-weight: 600; color: var(--muted); text-decoration: none;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  padding: 0.25rem 0.75rem; white-space: nowrap;
+}
+.help-link:hover { color: var(--text); border-color: var(--accent); }
+.back-link { font-size: 0.85rem; color: var(--muted); text-decoration: none; display: inline-block; margin-bottom: 1rem; }
+.back-link:hover { color: var(--text); }
+
+.docs dl { margin: 0; }
+.docs dt {
+  font-weight: 800; color: var(--text); font-size: 0.95rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.docs dd { color: var(--muted); margin: 0.25rem 0 1.1rem; font-size: 0.87rem; line-height: 1.55; }
+.docs dd:last-child { margin-bottom: 0; }
+.docs .card h3 { font-size: 0.98rem; margin: 0 0 0.9rem; font-weight: 800; }
+.docs .card + .card { margin-top: 1.25rem; }
+.docs .callout {
+  background: #876afa14; border: 1px solid #876afa40; color: var(--text);
+  padding: 0.8rem 1rem; border-radius: var(--radius-card); font-size: 0.85rem; line-height: 1.55; margin-top: 1rem;
+}
+.docs .callout b { color: var(--accent); }
+.docs ol, .docs ul { margin: 0; padding-left: 1.2rem; color: var(--muted); font-size: 0.87rem; line-height: 1.7; }
+.docs ol li, .docs ul li { margin-bottom: 0.3rem; }
+.docs ol li b, .docs ul li b { color: var(--text); }
+
+.muted { color: var(--muted); }
+.error-box {
+  background: #ff6b6b14; border: 1px solid #ff6b6b40; color: var(--bad);
+  padding: 0.7rem 1rem; border-radius: var(--radius-card); margin-bottom: 1.25rem; font-size: 0.85rem;
+}
+.ok-box {
+  background: #3ecf8e14; border: 1px solid #3ecf8e40; color: var(--good);
+  padding: 0.7rem 1rem; border-radius: var(--radius-card); margin-bottom: 1.25rem; font-size: 0.85rem;
+}
+
+/* --- config editor: table description cell gets a small textarea instead of a truncating
+   single-line input. Auto-grows to fit content (static/autogrow.js) rather than scrolling
+   internally, so overflow: hidden here is safe - there's never hidden content to reveal. --- */
+table textarea { resize: vertical; font-family: inherit; overflow: hidden; }
